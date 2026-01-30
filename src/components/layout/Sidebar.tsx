@@ -11,14 +11,27 @@ import {
   Trash2,
   Grid3X3,
   Magnet,
+  Armchair,
+  Table,
+  Archive,
+  Bed,
+  Flower,
+  Refrigerator,
+  Bath,
+  Sun,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { useEditorStore, useActiveTool, useFloorPlanStore } from '@/stores'
-import type { EditorTool } from '@/models'
+import type { EditorTool, FurnitureCategory } from '@/models'
 import { cn } from '@/lib/utils'
 import { useState } from 'react'
+import {
+  FURNITURE_CATALOG,
+  getFurnitureByCategory,
+  CATEGORY_LABELS,
+} from '@/services/catalog'
 
 interface ToolButtonProps {
   tool: EditorTool
@@ -39,7 +52,7 @@ function ToolButton({ tool, icon, label, shortcut }: ToolButtonProps) {
         'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all',
         'hover:bg-secondary/60',
         isActive
-          ? 'bg-primary/10 text-primary font-medium'
+          ? 'bg-primary/15 text-primary font-medium ring-1 ring-primary/30'
           : 'text-muted-foreground hover:text-foreground'
       )}
       title={shortcut ? `${label} (${shortcut})` : label}
@@ -134,16 +147,114 @@ const WALL_MATERIALS = {
   ],
 }
 
-type MaterialCategory = 'paints' | 'finishes' | 'accent'
+type MaterialCategoryTab = 'paints' | 'finishes' | 'accent'
+
+const FURNITURE_CATEGORIES: FurnitureCategory[] = [
+  'seating',
+  'tables',
+  'beds',
+  'storage',
+  'lighting',
+  'decor',
+  'appliances',
+  'bathroom',
+]
+
+const CATEGORY_ICON_MAP: Record<FurnitureCategory, React.ReactNode> = {
+  seating: <Armchair className="w-4 h-4" />,
+  tables: <Table className="w-4 h-4" />,
+  storage: <Archive className="w-4 h-4" />,
+  beds: <Bed className="w-4 h-4" />,
+  lighting: <Lamp className="w-4 h-4" />,
+  decor: <Flower className="w-4 h-4" />,
+  appliances: <Refrigerator className="w-4 h-4" />,
+  bathroom: <Bath className="w-4 h-4" />,
+  outdoor: <Sun className="w-4 h-4" />,
+}
+
+function FurnitureCatalogPanel() {
+  const [selectedCategory, setSelectedCategory] = useState<FurnitureCategory>('seating')
+  const { addFurniture } = useFloorPlanStore()
+
+  const items = getFurnitureByCategory(selectedCategory)
+
+  const handleAddFurniture = (catalogItemId: string) => {
+    const catalogItem = FURNITURE_CATALOG.find(item => item.id === catalogItemId)
+    if (!catalogItem) return
+
+    addFurniture({
+      catalogItemId,
+      position: { x: 200, y: 200 }, // Default position in center
+      rotation: 0,
+      dimensions: { ...catalogItem.defaultDimensions },
+      partMaterials: {},
+      locked: false,
+    })
+  }
+
+  return (
+    <div className="mt-6">
+      <h4 className="text-[11px] font-semibold text-muted-foreground/70 uppercase tracking-widest mb-3">
+        Furniture
+      </h4>
+
+      {/* Category tabs */}
+      <div className="flex flex-wrap gap-1 mb-3">
+        {FURNITURE_CATEGORIES.map((cat) => (
+          <button
+            key={cat}
+            onClick={() => setSelectedCategory(cat)}
+            className={cn(
+              'flex items-center gap-1 px-2 py-1 rounded-md text-xs transition-all',
+              selectedCategory === cat
+                ? 'bg-primary/10 text-primary'
+                : 'text-muted-foreground hover:bg-secondary/50 hover:text-foreground'
+            )}
+            title={CATEGORY_LABELS[cat]}
+          >
+            {CATEGORY_ICON_MAP[cat]}
+          </button>
+        ))}
+      </div>
+
+      {/* Items grid */}
+      <div className="grid grid-cols-2 gap-2">
+        {items.map((item) => (
+          <button
+            key={item.id}
+            onClick={() => handleAddFurniture(item.id)}
+            className="p-3 border border-border/40 rounded-xl hover:bg-secondary/50 hover:border-border transition-all text-center group"
+          >
+            <div className="w-full aspect-square mb-2 bg-muted/30 rounded-lg flex items-center justify-center group-hover:bg-muted/50 transition-colors">
+              {CATEGORY_ICON_MAP[item.category]}
+            </div>
+            <div className="text-xs text-muted-foreground truncate" title={item.name}>
+              {item.name}
+            </div>
+            <div className="text-[10px] text-muted-foreground/50">
+              {item.defaultDimensions.width}x{item.defaultDimensions.depth}cm
+            </div>
+          </button>
+        ))}
+      </div>
+
+      {items.length === 0 && (
+        <p className="text-xs text-muted-foreground/60 text-center py-4">
+          No items in this category
+        </p>
+      )}
+    </div>
+  )
+}
 
 export function Sidebar() {
   const { showGrid, snapToGrid, toggleGrid, toggleSnapToGrid, selectedIds, clearSelection } =
     useEditorStore()
-  const { removeWall, updateWall, floorPlan } = useFloorPlanStore()
-  const [materialCategory, setMaterialCategory] = useState<MaterialCategory>('paints')
+  const { removeSelected, updateWall, floorPlan } = useFloorPlanStore()
+  const [materialCategory, setMaterialCategory] = useState<MaterialCategoryTab>('paints')
 
   const handleDelete = () => {
-    selectedIds.forEach((id) => removeWall(id))
+    removeSelected(selectedIds)
     clearSelection()
   }
 
@@ -362,31 +473,7 @@ export function Sidebar() {
           )}
 
           {/* Furniture Catalog */}
-          <div className="mt-6">
-            <h4 className="text-[11px] font-semibold text-muted-foreground/70 uppercase tracking-widest mb-3">
-              Furniture
-            </h4>
-            <div className="grid grid-cols-2 gap-2">
-              {[
-                { name: 'Sofa', icon: '🛋️' },
-                { name: 'Chair', icon: '🪑' },
-                { name: 'Table', icon: '🪵' },
-                { name: 'Bed', icon: '🛏️' },
-                { name: 'Desk', icon: '📐' },
-                { name: 'Lamp', icon: '💡' },
-              ].map((item) => (
-                <button
-                  key={item.name}
-                  className="p-3 border border-border/40 rounded-xl hover:bg-secondary/50 hover:border-border transition-all text-center group"
-                >
-                  <div className="text-2xl mb-1.5 group-hover:scale-110 transition-transform">
-                    {item.icon}
-                  </div>
-                  <div className="text-xs text-muted-foreground">{item.name}</div>
-                </button>
-              ))}
-            </div>
-          </div>
+          <FurnitureCatalogPanel />
         </ScrollArea>
       </div>
     </aside>

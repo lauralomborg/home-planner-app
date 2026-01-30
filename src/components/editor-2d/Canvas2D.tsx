@@ -1,10 +1,11 @@
-import { useRef, useCallback, useEffect, useState } from 'react'
+import { useRef, useCallback, useEffect, useState, useMemo } from 'react'
 import { Stage, Layer, Line, Rect, Circle, Group, Text, Tag, Label, Arc } from 'react-konva'
 import type { KonvaEventObject } from 'konva/lib/Node'
 import type Konva from 'konva'
 import { useFloorPlanStore, useEditorStore } from '@/stores'
-import type { Point2D, Wall, WindowInstance, DoorInstance } from '@/models'
+import type { Point2D, Wall, Room, WindowInstance, DoorInstance } from '@/models'
 import { DEFAULT_WALL_THICKNESS, DEFAULT_WALL_HEIGHT, DEFAULT_WINDOW_HEIGHT, DEFAULT_WINDOW_ELEVATION, DEFAULT_DOOR_HEIGHT } from '@/models'
+import { getPolygonFromWalls, getPolygonCentroid } from '@/services/geometry'
 
 const GRID_SIZE = 50 // 50cm grid
 
@@ -27,6 +28,9 @@ const COLORS = {
   windowFrame: '#5C5650',
   door: '#8B7355',
   doorFrame: '#5C5650',
+  roomFloor: '#E8E0D5',
+  roomSelected: '#D5E8DE',
+  roomLabel: '#5C5650',
 }
 
 // Snap position to grid
@@ -411,6 +415,78 @@ function DoorShape({
   )
 }
 
+// Room floor shape
+function RoomShape({
+  room,
+  walls,
+  isSelected,
+  isHovered,
+  scale,
+}: {
+  room: Room
+  walls: Wall[]
+  isSelected: boolean
+  isHovered: boolean
+  scale: number
+}) {
+  const { select, setHovered } = useEditorStore()
+
+  const polygon = useMemo(() => {
+    return getPolygonFromWalls(walls, room.wallIds)
+  }, [walls, room.wallIds])
+
+  const centroid = useMemo(() => {
+    return getPolygonCentroid(polygon)
+  }, [polygon])
+
+  if (polygon.length < 3) return null
+
+  const points = polygon.flatMap(p => [p.x, p.y])
+  const floorColor = room.floorMaterial.colorOverride || COLORS.roomFloor
+  const fillColor = isSelected ? COLORS.roomSelected : floorColor
+
+  return (
+    <Group>
+      <Line
+        points={points}
+        closed
+        fill={fillColor}
+        opacity={isSelected ? 0.5 : isHovered ? 0.4 : 0.3}
+        onClick={() => select([room.id])}
+        onMouseEnter={() => setHovered(room.id)}
+        onMouseLeave={() => setHovered(null)}
+      />
+      {/* Room label */}
+      <Text
+        x={centroid.x}
+        y={centroid.y}
+        text={room.name}
+        fontSize={14 / scale}
+        fontFamily="system-ui, sans-serif"
+        fill={COLORS.roomLabel}
+        opacity={0.7}
+        align="center"
+        offsetX={room.name.length * 3.5 / scale}
+        offsetY={7 / scale}
+        listening={false}
+      />
+      {/* Area label */}
+      <Text
+        x={centroid.x}
+        y={centroid.y + 16 / scale}
+        text={`${room.area.toFixed(1)} m²`}
+        fontSize={11 / scale}
+        fontFamily="system-ui, sans-serif"
+        fill={COLORS.roomLabel}
+        opacity={0.5}
+        align="center"
+        offsetX={room.area.toFixed(1).length * 3 / scale + 10 / scale}
+        listening={false}
+      />
+    </Group>
+  )
+}
+
 // Wall preview during drawing
 function WallPreview({
   start,
@@ -535,13 +611,17 @@ export function Canvas2D() {
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 })
   const [isPanning, setIsPanning] = useState(false)
   const [lastPointerPos, setLastPointerPos] = useState<Point2D | null>(null)
+  const [isSpaceHeld, setIsSpaceHeld] = useState(false)
+  const [roomDrawStart, setRoomDrawStart] = useState<Point2D | null>(null)
+  const [roomDrawPreview, setRoomDrawPreview] = useState<Point2D | null>(null)
 
   // Store state
   const walls = useFloorPlanStore((state) => state.floorPlan.walls)
+  const rooms = useFloorPlanStore((state) => state.floorPlan.rooms)
   const furniture = useFloorPlanStore((state) => state.floorPlan.furniture)
   const windows = useFloorPlanStore((state) => state.floorPlan.windows)
   const doors = useFloorPlanStore((state) => state.floorPlan.doors)
-  const { addWall, removeWall, addWindow, addDoor } = useFloorPlanStore()
+  const { addWall, removeSelected, addWindow, addDoor, detectRooms } = useFloorPlanStore()
 
   const {
     activeTool,
@@ -561,6 +641,7 @@ export function Canvas2D() {
     finishWallDraw,
     cancelWallDraw,
     clearSelection,
+    setActiveTool,
   } = useEditorStore()
 
   // Find wall at position for window/door placement
@@ -681,24 +762,43 @@ export function Canvas2D() {
     ]
   )
 
-  // Handle mouse down - start panning with middle mouse or right click
+  // Handle mouse down - start panning with middle mouse, right click, pan tool, or space held
   const handleMouseDown = useCallback(
     (e: KonvaEventObject<MouseEvent>) => {
+      const stage = e.target.getStage()
+      if (!stage) return
+
       // Middle mouse button (1) or right mouse button (2) for panning
-      if (e.evt.button === 1 || e.evt.button === 2) {
+      // OR pan tool with left click OR space held with left click
+      const shouldPan = e.evt.button === 1 || e.evt.button === 2 ||
+        (e.evt.button === 0 && (activeTool === 'pan' || isSpaceHeld))
+
+      if (shouldPan) {
         e.evt.preventDefault()
         setIsPanning(true)
-        const stage = e.target.getStage()
-        if (stage) {
-          const pos = stage.getPointerPosition()
-          if (pos) {
-            setLastPointerPos(pos)
-          }
-          stage.container().style.cursor = 'grabbing'
+        const pos = stage.getPointerPosition()
+        if (pos) {
+          setLastPointerPos(pos)
         }
+        stage.container().style.cursor = 'grabbing'
+        return
+      }
+
+      // Room tool: start drawing rectangle on left click
+      if (e.evt.button === 0 && activeTool === 'room') {
+        const pointerPos = stage.getPointerPosition()
+        if (!pointerPos) return
+
+        const worldPos = {
+          x: (pointerPos.x - pan2D.x) / zoom2D,
+          y: (pointerPos.y - pan2D.y) / zoom2D,
+        }
+        const snappedPos = snapToGrid(worldPos, GRID_SIZE, snapEnabled)
+        setRoomDrawStart(snappedPos)
+        setRoomDrawPreview(snappedPos)
       }
     },
-    []
+    [activeTool, isSpaceHeld, pan2D, zoom2D, snapEnabled]
   )
 
   // Handle mouse move
@@ -735,11 +835,25 @@ export function Canvas2D() {
         const snappedPos = snapToGrid(worldPos, GRID_SIZE, snapEnabled)
         updateWallDrawPreview(snappedPos)
       }
+
+      // Handle room drawing preview
+      if (roomDrawStart) {
+        const pointerPos = stage.getPointerPosition()
+        if (!pointerPos) return
+
+        const worldPos = {
+          x: (pointerPos.x - pan2D.x) / zoom2D,
+          y: (pointerPos.y - pan2D.y) / zoom2D,
+        }
+
+        const snappedPos = snapToGrid(worldPos, GRID_SIZE, snapEnabled)
+        setRoomDrawPreview(snappedPos)
+      }
     },
-    [isPanning, lastPointerPos, isDrawingWall, zoom2D, pan2D, snapEnabled, updateWallDrawPreview, setPan2D]
+    [isPanning, lastPointerPos, isDrawingWall, roomDrawStart, zoom2D, pan2D, snapEnabled, updateWallDrawPreview, setPan2D]
   )
 
-  // Handle mouse up - stop panning
+  // Handle mouse up - stop panning or finish room draw
   const handleMouseUp = useCallback(
     (e: KonvaEventObject<MouseEvent>) => {
       if (isPanning) {
@@ -749,9 +863,61 @@ export function Canvas2D() {
         if (stage) {
           stage.container().style.cursor = getCursor()
         }
+        return
+      }
+
+      // Finish room drawing - create 4 walls forming rectangle
+      if (roomDrawStart && roomDrawPreview) {
+        const minSize = 50 // Minimum room size in cm
+        const width = Math.abs(roomDrawPreview.x - roomDrawStart.x)
+        const height = Math.abs(roomDrawPreview.y - roomDrawStart.y)
+
+        if (width >= minSize && height >= minSize) {
+          // Calculate corner points
+          const left = Math.min(roomDrawStart.x, roomDrawPreview.x)
+          const right = Math.max(roomDrawStart.x, roomDrawPreview.x)
+          const top = Math.min(roomDrawStart.y, roomDrawPreview.y)
+          const bottom = Math.max(roomDrawStart.y, roomDrawPreview.y)
+
+          // Create 4 walls: top, right, bottom, left
+          addWall({
+            start: { x: left, y: top },
+            end: { x: right, y: top },
+            thickness: DEFAULT_WALL_THICKNESS,
+            height: DEFAULT_WALL_HEIGHT,
+            material: { materialId: 'white-paint' },
+          })
+          addWall({
+            start: { x: right, y: top },
+            end: { x: right, y: bottom },
+            thickness: DEFAULT_WALL_THICKNESS,
+            height: DEFAULT_WALL_HEIGHT,
+            material: { materialId: 'white-paint' },
+          })
+          addWall({
+            start: { x: right, y: bottom },
+            end: { x: left, y: bottom },
+            thickness: DEFAULT_WALL_THICKNESS,
+            height: DEFAULT_WALL_HEIGHT,
+            material: { materialId: 'white-paint' },
+          })
+          addWall({
+            start: { x: left, y: bottom },
+            end: { x: left, y: top },
+            thickness: DEFAULT_WALL_THICKNESS,
+            height: DEFAULT_WALL_HEIGHT,
+            material: { materialId: 'white-paint' },
+          })
+
+          // Detect rooms after creating walls
+          detectRooms()
+        }
+
+        setRoomDrawStart(null)
+        setRoomDrawPreview(null)
       }
     },
-    [isPanning]
+    [isPanning, roomDrawStart, roomDrawPreview, addWall, detectRooms]
   )
 
   // Handle wheel for zoom
@@ -804,24 +970,55 @@ export function Canvas2D() {
   // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Space key for temporary pan mode
+      if (e.code === 'Space' && !e.repeat) {
+        e.preventDefault()
+        setIsSpaceHeld(true)
+        const stage = stageRef.current
+        if (stage) {
+          stage.container().style.cursor = 'grab'
+        }
+        return
+      }
+
       if (e.key === 'Escape') {
         if (isDrawingWall) {
           cancelWallDraw()
-        } else {
-          clearSelection()
         }
+        // Cancel room drawing if in progress
+        if (roomDrawStart) {
+          setRoomDrawStart(null)
+          setRoomDrawPreview(null)
+        }
+        clearSelection()
+        setActiveTool('select')
       }
 
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedIds.length > 0) {
         e.preventDefault()
-        selectedIds.forEach((id) => removeWall(id))
+        removeSelected(selectedIds)
         clearSelection()
       }
     }
 
+    const handleKeyUp = (e: KeyboardEvent) => {
+      // Release space key
+      if (e.code === 'Space') {
+        setIsSpaceHeld(false)
+        const stage = stageRef.current
+        if (stage && !isPanning) {
+          stage.container().style.cursor = getCursor()
+        }
+      }
+    }
+
     window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [isDrawingWall, cancelWallDraw, clearSelection, selectedIds, removeWall])
+    window.addEventListener('keyup', handleKeyUp)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('keyup', handleKeyUp)
+    }
+  }, [isDrawingWall, cancelWallDraw, clearSelection, selectedIds, removeSelected, setActiveTool, roomDrawStart, isPanning])
 
   // Resize observer
   useEffect(() => {
@@ -842,14 +1039,16 @@ export function Canvas2D() {
   }, [])
 
   // Cursor based on tool
-  const getCursor = () => {
+  const getCursor = useCallback(() => {
     if (isPanning) return 'grabbing'
+    if (isSpaceHeld) return 'grab'
     if (activeTool === 'wall') return 'crosshair'
+    if (activeTool === 'room') return 'crosshair'
     if (activeTool === 'window') return 'crosshair'
     if (activeTool === 'door') return 'crosshair'
     if (activeTool === 'pan') return 'grab'
     return 'default'
-  }
+  }, [isPanning, isSpaceHeld, activeTool])
 
   return (
     <div
@@ -889,6 +1088,18 @@ export function Canvas2D() {
         {/* Main Content Layer */}
         <Layer>
           <OriginMarker scale={zoom2D} />
+
+          {/* Rooms (render first, behind walls) */}
+          {rooms.map((room) => (
+            <RoomShape
+              key={room.id}
+              room={room}
+              walls={walls}
+              isSelected={selectedIds.includes(room.id)}
+              isHovered={hoveredId === room.id}
+              scale={zoom2D}
+            />
+          ))}
 
           {/* Walls */}
           {walls.map((wall) => (
@@ -943,6 +1154,22 @@ export function Canvas2D() {
               end={wallDrawPreview}
               thickness={DEFAULT_WALL_THICKNESS}
               scale={zoom2D}
+            />
+          )}
+
+          {/* Room drawing preview */}
+          {roomDrawStart && roomDrawPreview && (
+            <Rect
+              x={Math.min(roomDrawStart.x, roomDrawPreview.x)}
+              y={Math.min(roomDrawStart.y, roomDrawPreview.y)}
+              width={Math.abs(roomDrawPreview.x - roomDrawStart.x)}
+              height={Math.abs(roomDrawPreview.y - roomDrawStart.y)}
+              fill={COLORS.wallPreview}
+              opacity={0.1}
+              stroke={COLORS.wallPreview}
+              strokeWidth={2 / zoom2D}
+              dash={[8 / zoom2D, 4 / zoom2D]}
+              listening={false}
             />
           )}
         </Layer>
