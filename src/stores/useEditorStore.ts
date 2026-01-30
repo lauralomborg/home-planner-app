@@ -16,6 +16,7 @@ interface EditorState {
   isDrawingWall: boolean
   wallDrawStart: Point2D | null
   wallDrawPreview: Point2D | null
+  selectedFurnitureId: string | null // Catalog item ID for furniture placement
 
   // Selection state
   selectedIds: string[]
@@ -40,6 +41,7 @@ interface EditorState {
   updateWallDrawPreview: (position: Point2D | null) => void
   finishWallDraw: () => void
   cancelWallDraw: () => void
+  setSelectedFurniture: (catalogItemId: string | null) => void
 
   // Selection actions
   select: (ids: string[]) => void
@@ -72,6 +74,7 @@ export const useEditorStore = create<EditorState>()(
     isDrawingWall: false,
     wallDrawStart: null,
     wallDrawPreview: null,
+    selectedFurnitureId: null,
 
     selectedIds: [],
     hoveredId: null,
@@ -168,6 +171,12 @@ export const useEditorStore = create<EditorState>()(
       })
     },
 
+    setSelectedFurniture: (catalogItemId) => {
+      set((state) => {
+        state.selectedFurnitureId = catalogItemId
+      })
+    },
+
     // ==================== Selection Actions ====================
 
     select: (ids) => {
@@ -233,6 +242,7 @@ export const useEditorStore = create<EditorState>()(
 export const useActiveTool = () => useEditorStore((state) => state.activeTool)
 export const useActiveView = () => useEditorStore((state) => state.activeView)
 export const useSelectedIds = () => useEditorStore((state) => state.selectedIds)
+export const useSelectedFurnitureId = () => useEditorStore((state) => state.selectedFurnitureId)
 export const useIsSelected = (id: string) =>
   useEditorStore((state) => state.selectedIds.includes(id))
 export const useIsHovered = (id: string) =>

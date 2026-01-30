@@ -28,7 +28,6 @@ import type { EditorTool, FurnitureCategory } from '@/models'
 import { cn } from '@/lib/utils'
 import { useState } from 'react'
 import {
-  FURNITURE_CATALOG,
   getFurnitureByCategory,
   CATEGORY_LABELS,
 } from '@/services/catalog'
@@ -174,22 +173,14 @@ const CATEGORY_ICON_MAP: Record<FurnitureCategory, React.ReactNode> = {
 
 function FurnitureCatalogPanel() {
   const [selectedCategory, setSelectedCategory] = useState<FurnitureCategory>('seating')
-  const { addFurniture } = useFloorPlanStore()
+  const { setSelectedFurniture, setActiveTool, selectedFurnitureId } = useEditorStore()
 
   const items = getFurnitureByCategory(selectedCategory)
 
-  const handleAddFurniture = (catalogItemId: string) => {
-    const catalogItem = FURNITURE_CATALOG.find(item => item.id === catalogItemId)
-    if (!catalogItem) return
-
-    addFurniture({
-      catalogItemId,
-      position: { x: 200, y: 200 }, // Default position in center
-      rotation: 0,
-      dimensions: { ...catalogItem.defaultDimensions },
-      partMaterials: {},
-      locked: false,
-    })
+  const handleSelectFurniture = (catalogItemId: string) => {
+    // Set the selected furniture and switch to furniture tool for click-to-place
+    setSelectedFurniture(catalogItemId)
+    setActiveTool('furniture')
   }
 
   return (
@@ -219,28 +210,48 @@ function FurnitureCatalogPanel() {
 
       {/* Items grid */}
       <div className="grid grid-cols-2 gap-2">
-        {items.map((item) => (
-          <button
-            key={item.id}
-            onClick={() => handleAddFurniture(item.id)}
-            className="p-3 border border-border/40 rounded-xl hover:bg-secondary/50 hover:border-border transition-all text-center group"
-          >
-            <div className="w-full aspect-square mb-2 bg-muted/30 rounded-lg flex items-center justify-center group-hover:bg-muted/50 transition-colors">
-              {CATEGORY_ICON_MAP[item.category]}
-            </div>
-            <div className="text-xs text-muted-foreground truncate" title={item.name}>
-              {item.name}
-            </div>
-            <div className="text-[10px] text-muted-foreground/50">
-              {item.defaultDimensions.width}x{item.defaultDimensions.depth}cm
-            </div>
-          </button>
-        ))}
+        {items.map((item) => {
+          const isSelected = selectedFurnitureId === item.id
+          return (
+            <button
+              key={item.id}
+              onClick={() => handleSelectFurniture(item.id)}
+              className={cn(
+                "p-3 border rounded-xl hover:bg-secondary/50 transition-all text-center group",
+                isSelected
+                  ? "border-primary bg-primary/5 ring-1 ring-primary/30"
+                  : "border-border/40 hover:border-border"
+              )}
+            >
+              <div className={cn(
+                "w-full aspect-square mb-2 rounded-lg flex items-center justify-center transition-colors",
+                isSelected ? "bg-primary/10" : "bg-muted/30 group-hover:bg-muted/50"
+              )}>
+                {CATEGORY_ICON_MAP[item.category]}
+              </div>
+              <div className={cn(
+                "text-xs truncate",
+                isSelected ? "text-primary font-medium" : "text-muted-foreground"
+              )} title={item.name}>
+                {item.name}
+              </div>
+              <div className="text-[10px] text-muted-foreground/50">
+                {item.defaultDimensions.width}x{item.defaultDimensions.depth}cm
+              </div>
+            </button>
+          )
+        })}
       </div>
 
       {items.length === 0 && (
         <p className="text-xs text-muted-foreground/60 text-center py-4">
           No items in this category
+        </p>
+      )}
+
+      {selectedFurnitureId && (
+        <p className="text-xs text-primary/80 text-center py-2 mt-2 bg-primary/5 rounded-lg">
+          Click on canvas to place
         </p>
       )}
     </div>

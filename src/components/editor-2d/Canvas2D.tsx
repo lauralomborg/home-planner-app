@@ -6,6 +6,7 @@ import { useFloorPlanStore, useEditorStore } from '@/stores'
 import type { Point2D, Wall, Room, WindowInstance, DoorInstance } from '@/models'
 import { DEFAULT_WALL_THICKNESS, DEFAULT_WALL_HEIGHT, DEFAULT_WINDOW_HEIGHT, DEFAULT_WINDOW_ELEVATION, DEFAULT_DOOR_HEIGHT } from '@/models'
 import { getPolygonFromWalls, getPolygonCentroid } from '@/services/geometry'
+import { FURNITURE_CATALOG } from '@/services/catalog'
 
 const GRID_SIZE = 50 // 50cm grid
 
@@ -297,6 +298,7 @@ function WindowShape({
   scale: number
 }) {
   const { select, setHovered } = useEditorStore()
+  const { updateWindow } = useFloorPlanStore()
 
   // Calculate window position on wall
   const dx = wall.end.x - wall.start.x
@@ -312,14 +314,52 @@ function WindowShape({
   const windowWidth = window.width
   const thickness = wall.thickness + 4
 
+  // Handle drag to move window along wall
+  const handleDragMove = useCallback((e: KonvaEventObject<DragEvent>) => {
+    const node = e.target
+    const dragX = node.x()
+    const dragY = node.y()
+
+    // Project drag position onto wall line
+    const px = dragX - wall.start.x
+    const py = dragY - wall.start.y
+
+    // Calculate position along wall (dot product / length)
+    const dotProduct = px * dx + py * dy
+    let newPosition = dotProduct / wallLength
+
+    // Clamp position to keep window within wall bounds
+    const minPos = windowWidth / 2
+    const maxPos = wallLength - windowWidth / 2
+    newPosition = Math.max(minPos, Math.min(maxPos, newPosition))
+
+    // Update window position in store
+    updateWindow(window.id, { position: newPosition })
+
+    // Reset node position (the Group will re-render at correct position from state)
+    const newT = newPosition / wallLength
+    node.x(wall.start.x + dx * newT)
+    node.y(wall.start.y + dy * newT)
+  }, [wall, dx, dy, wallLength, windowWidth, updateWindow, window.id])
+
   return (
     <Group
       x={centerX}
       y={centerY}
       rotation={angle * (180 / Math.PI)}
+      draggable
       onClick={() => select([window.id])}
-      onMouseEnter={() => setHovered(window.id)}
-      onMouseLeave={() => setHovered(null)}
+      onDragMove={handleDragMove}
+      onMouseEnter={(e) => {
+        setHovered(window.id)
+        const stage = e.target.getStage()
+        if (stage) stage.container().style.cursor = 'move'
+      }}
+      onMouseLeave={(e) => {
+        setHovered(null)
+        const stage = e.target.getStage()
+        if (stage) stage.container().style.cursor = 'default'
+      }}
     >
       {/* Window frame */}
       <Rect
@@ -355,6 +395,7 @@ function DoorShape({
   scale: number
 }) {
   const { select, setHovered } = useEditorStore()
+  const { updateDoor } = useFloorPlanStore()
 
   const dx = wall.end.x - wall.start.x
   const dy = wall.end.y - wall.start.y
@@ -369,14 +410,52 @@ function DoorShape({
   const thickness = wall.thickness + 4
   const swingDirection = door.openDirection === 'left' ? -1 : 1
 
+  // Handle drag to move door along wall
+  const handleDragMove = useCallback((e: KonvaEventObject<DragEvent>) => {
+    const node = e.target
+    const dragX = node.x()
+    const dragY = node.y()
+
+    // Project drag position onto wall line
+    const px = dragX - wall.start.x
+    const py = dragY - wall.start.y
+
+    // Calculate position along wall (dot product / length)
+    const dotProduct = px * dx + py * dy
+    let newPosition = dotProduct / wallLength
+
+    // Clamp position to keep door within wall bounds
+    const minPos = doorWidth / 2
+    const maxPos = wallLength - doorWidth / 2
+    newPosition = Math.max(minPos, Math.min(maxPos, newPosition))
+
+    // Update door position in store
+    updateDoor(door.id, { position: newPosition })
+
+    // Reset node position (the Group will re-render at correct position from state)
+    const newT = newPosition / wallLength
+    node.x(wall.start.x + dx * newT)
+    node.y(wall.start.y + dy * newT)
+  }, [wall, dx, dy, wallLength, doorWidth, updateDoor, door.id])
+
   return (
     <Group
       x={centerX}
       y={centerY}
       rotation={angle * (180 / Math.PI)}
+      draggable
       onClick={() => select([door.id])}
-      onMouseEnter={() => setHovered(door.id)}
-      onMouseLeave={() => setHovered(null)}
+      onDragMove={handleDragMove}
+      onMouseEnter={(e) => {
+        setHovered(door.id)
+        const stage = e.target.getStage()
+        if (stage) stage.container().style.cursor = 'move'
+      }}
+      onMouseLeave={(e) => {
+        setHovered(null)
+        const stage = e.target.getStage()
+        if (stage) stage.container().style.cursor = 'default'
+      }}
     >
       {/* Door opening */}
       <Rect
@@ -621,7 +700,7 @@ export function Canvas2D() {
   const furniture = useFloorPlanStore((state) => state.floorPlan.furniture)
   const windows = useFloorPlanStore((state) => state.floorPlan.windows)
   const doors = useFloorPlanStore((state) => state.floorPlan.doors)
-  const { addWall, removeSelected, addWindow, addDoor, detectRooms } = useFloorPlanStore()
+  const { addWall, removeSelected, addWindow, addDoor, detectRooms, addFurniture } = useFloorPlanStore()
 
   const {
     activeTool,
@@ -634,6 +713,7 @@ export function Canvas2D() {
     wallDrawPreview,
     selectedIds,
     hoveredId,
+    selectedFurnitureId,
     setZoom2D,
     setPan2D,
     startWallDraw,
@@ -738,6 +818,19 @@ export function Canvas2D() {
             openAngle: 0,
           })
         }
+      } else if (activeTool === 'furniture' && selectedFurnitureId) {
+        // Find the catalog item to get default dimensions
+        const catalogItem = FURNITURE_CATALOG.find((item) => item.id === selectedFurnitureId)
+        if (catalogItem) {
+          addFurniture({
+            catalogItemId: selectedFurnitureId,
+            position: snappedPos,
+            rotation: 0,
+            dimensions: { ...catalogItem.defaultDimensions },
+            partMaterials: {},
+            locked: false,
+          })
+        }
       } else if (activeTool === 'select') {
         if (e.target === stage) {
           clearSelection()
@@ -752,9 +845,11 @@ export function Canvas2D() {
       zoom2D,
       pan2D,
       isPanning,
+      selectedFurnitureId,
       addWall,
       addWindow,
       addDoor,
+      addFurniture,
       startWallDraw,
       finishWallDraw,
       clearSelection,
@@ -1046,9 +1141,10 @@ export function Canvas2D() {
     if (activeTool === 'room') return 'crosshair'
     if (activeTool === 'window') return 'crosshair'
     if (activeTool === 'door') return 'crosshair'
+    if (activeTool === 'furniture' && selectedFurnitureId) return 'crosshair'
     if (activeTool === 'pan') return 'grab'
     return 'default'
-  }, [isPanning, isSpaceHeld, activeTool])
+  }, [isPanning, isSpaceHeld, activeTool, selectedFurnitureId])
 
   return (
     <div

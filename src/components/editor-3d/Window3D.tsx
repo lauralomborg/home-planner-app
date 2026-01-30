@@ -1,0 +1,183 @@
+import * as THREE from 'three'
+import type { WindowInstance, Wall } from '@/models'
+
+// Nordic color palette
+const COLORS = {
+  frame: '#E8E0D5',
+  frameSelected: '#5B8A72',
+  glass: '#87CEEB',
+}
+
+interface Window3DProps {
+  window: WindowInstance
+  wall: Wall
+  isSelected: boolean
+}
+
+export function Window3D({ window: windowInstance, wall, isSelected }: Window3DProps) {
+  // Calculate wall properties
+  const dx = wall.end.x - wall.start.x
+  const dy = wall.end.y - wall.start.y
+  const wallLength = Math.sqrt(dx * dx + dy * dy)
+  const wallAngle = Math.atan2(dy, dx)
+
+  // Window dimensions in meters
+  const windowWidth = windowInstance.width / 100
+  const windowHeight = windowInstance.height / 100
+  const frameThickness = 0.05 // 5cm frame
+  const frameDepth = wall.thickness / 100 + 0.02 // Slightly thicker than wall
+
+  // Position along wall (normalized 0-1) - position is already the center
+  const positionAlongWall = windowInstance.position / wallLength
+
+  // Calculate 3D position
+  const windowCenterX = (wall.start.x + dx * positionAlongWall) / 100
+  const windowCenterZ = (wall.start.y + dy * positionAlongWall) / 100
+  const windowCenterY = (windowInstance.elevationFromFloor + windowInstance.height / 2) / 100
+
+  const frameColor = isSelected ? COLORS.frameSelected : windowInstance.frameMaterial.colorOverride || COLORS.frame
+  const glassOpacity = windowInstance.glassOpacity
+
+  // Determine if this is a divided window (double type has center divider)
+  const hasCenterDivider = windowInstance.type === 'double'
+  const hasSlidingDivider = windowInstance.type === 'sliding'
+
+  return (
+    <group
+      position={[windowCenterX, windowCenterY, windowCenterZ]}
+      rotation={[0, -wallAngle, 0]}
+    >
+      {/* Frame - 4 pieces forming rectangle */}
+      {/* Top frame */}
+      <mesh position={[0, windowHeight / 2 - frameThickness / 2, 0]} castShadow>
+        <boxGeometry args={[windowWidth, frameThickness, frameDepth]} />
+        <meshStandardMaterial color={frameColor} roughness={0.7} />
+      </mesh>
+
+      {/* Bottom frame */}
+      <mesh position={[0, -windowHeight / 2 + frameThickness / 2, 0]} castShadow>
+        <boxGeometry args={[windowWidth, frameThickness, frameDepth]} />
+        <meshStandardMaterial color={frameColor} roughness={0.7} />
+      </mesh>
+
+      {/* Left frame */}
+      <mesh position={[-windowWidth / 2 + frameThickness / 2, 0, 0]} castShadow>
+        <boxGeometry args={[frameThickness, windowHeight - frameThickness * 2, frameDepth]} />
+        <meshStandardMaterial color={frameColor} roughness={0.7} />
+      </mesh>
+
+      {/* Right frame */}
+      <mesh position={[windowWidth / 2 - frameThickness / 2, 0, 0]} castShadow>
+        <boxGeometry args={[frameThickness, windowHeight - frameThickness * 2, frameDepth]} />
+        <meshStandardMaterial color={frameColor} roughness={0.7} />
+      </mesh>
+
+      {/* Center vertical divider for double windows */}
+      {hasCenterDivider && (
+        <mesh position={[0, 0, 0]} castShadow>
+          <boxGeometry args={[frameThickness * 0.6, windowHeight - frameThickness * 2, frameDepth]} />
+          <meshStandardMaterial color={frameColor} roughness={0.7} />
+        </mesh>
+      )}
+
+      {/* Horizontal center divider for sliding windows */}
+      {hasSlidingDivider && (
+        <mesh position={[0, 0, 0]} castShadow>
+          <boxGeometry args={[windowWidth - frameThickness * 2, frameThickness * 0.6, frameDepth]} />
+          <meshStandardMaterial color={frameColor} roughness={0.7} />
+        </mesh>
+      )}
+
+      {/* Glass pane(s) */}
+      {hasCenterDivider ? (
+        <>
+          {/* Left glass pane */}
+          <mesh position={[-windowWidth / 4, 0, 0]}>
+            <planeGeometry args={[
+              windowWidth / 2 - frameThickness * 1.3,
+              windowHeight - frameThickness * 2
+            ]} />
+            <meshStandardMaterial
+              color={COLORS.glass}
+              transparent
+              opacity={glassOpacity}
+              roughness={0.1}
+              metalness={0.1}
+              side={THREE.DoubleSide}
+            />
+          </mesh>
+          {/* Right glass pane */}
+          <mesh position={[windowWidth / 4, 0, 0]}>
+            <planeGeometry args={[
+              windowWidth / 2 - frameThickness * 1.3,
+              windowHeight - frameThickness * 2
+            ]} />
+            <meshStandardMaterial
+              color={COLORS.glass}
+              transparent
+              opacity={glassOpacity}
+              roughness={0.1}
+              metalness={0.1}
+              side={THREE.DoubleSide}
+            />
+          </mesh>
+        </>
+      ) : hasSlidingDivider ? (
+        <>
+          {/* Top glass pane */}
+          <mesh position={[0, windowHeight / 4, 0]}>
+            <planeGeometry args={[
+              windowWidth - frameThickness * 2,
+              windowHeight / 2 - frameThickness * 1.3
+            ]} />
+            <meshStandardMaterial
+              color={COLORS.glass}
+              transparent
+              opacity={glassOpacity}
+              roughness={0.1}
+              metalness={0.1}
+              side={THREE.DoubleSide}
+            />
+          </mesh>
+          {/* Bottom glass pane */}
+          <mesh position={[0, -windowHeight / 4, 0]}>
+            <planeGeometry args={[
+              windowWidth - frameThickness * 2,
+              windowHeight / 2 - frameThickness * 1.3
+            ]} />
+            <meshStandardMaterial
+              color={COLORS.glass}
+              transparent
+              opacity={glassOpacity}
+              roughness={0.1}
+              metalness={0.1}
+              side={THREE.DoubleSide}
+            />
+          </mesh>
+        </>
+      ) : (
+        /* Single glass pane */
+        <mesh>
+          <planeGeometry args={[
+            windowWidth - frameThickness * 2,
+            windowHeight - frameThickness * 2
+          ]} />
+          <meshStandardMaterial
+            color={COLORS.glass}
+            transparent
+            opacity={glassOpacity}
+            roughness={0.1}
+            metalness={0.1}
+            side={THREE.DoubleSide}
+          />
+        </mesh>
+      )}
+
+      {/* Window sill */}
+      <mesh position={[0, -windowHeight / 2 - 0.02, frameDepth / 2 + 0.03]} castShadow>
+        <boxGeometry args={[windowWidth + 0.04, 0.04, 0.1]} />
+        <meshStandardMaterial color={frameColor} roughness={0.7} />
+      </mesh>
+    </group>
+  )
+}
