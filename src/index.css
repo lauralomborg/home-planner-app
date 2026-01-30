@@ -1,0 +1,127 @@
+@import "tailwindcss";
+
+/* Nordic/Scandinavian Design System */
+:root {
+  /* Warm, natural background tones */
+  --background: 40 20% 98%;
+  --foreground: 30 10% 20%;
+
+  /* Card surfaces - soft warm white */
+  --card: 40 30% 99%;
+  --card-foreground: 30 10% 20%;
+
+  /* Popover */
+  --popover: 40 30% 99%;
+  --popover-foreground: 30 10% 20%;
+
+  /* Primary - muted sage green */
+  --primary: 150 20% 40%;
+  --primary-foreground: 40 30% 98%;
+
+  /* Secondary - warm light gray */
+  --secondary: 30 10% 94%;
+  --secondary-foreground: 30 10% 30%;
+
+  /* Muted - soft warm gray */
+  --muted: 30 10% 96%;
+  --muted-foreground: 30 8% 50%;
+
+  /* Accent - soft terracotta */
+  --accent: 20 40% 94%;
+  --accent-foreground: 20 40% 30%;
+
+  /* Destructive - muted coral */
+  --destructive: 0 50% 55%;
+  --destructive-foreground: 40 30% 98%;
+
+  /* Borders - very subtle */
+  --border: 30 15% 90%;
+  --input: 30 15% 90%;
+  --ring: 150 20% 40%;
+
+  /* Radius - softer corners */
+  --radius: 0.75rem;
+
+  /* Canvas specific */
+  --canvas-bg: 40 25% 97%;
+  --grid-line: 30 10% 88%;
+  --wall-color: 30 15% 35%;
+  --wall-selected: 150 30% 45%;
+  --wall-hover: 150 20% 55%;
+}
+
+.dark {
+  --background: 30 10% 10%;
+  --foreground: 40 20% 95%;
+  --card: 30 10% 12%;
+  --card-foreground: 40 20% 95%;
+  --popover: 30 10% 12%;
+  --popover-foreground: 40 20% 95%;
+  --primary: 150 25% 55%;
+  --primary-foreground: 30 10% 10%;
+  --secondary: 30 10% 18%;
+  --secondary-foreground: 40 20% 90%;
+  --muted: 30 10% 18%;
+  --muted-foreground: 30 10% 60%;
+  --accent: 20 30% 20%;
+  --accent-foreground: 20 30% 90%;
+  --destructive: 0 50% 45%;
+  --destructive-foreground: 40 20% 95%;
+  --border: 30 10% 20%;
+  --input: 30 10% 20%;
+  --ring: 150 25% 55%;
+  --canvas-bg: 30 10% 8%;
+  --grid-line: 30 10% 18%;
+  --wall-color: 40 15% 70%;
+  --wall-selected: 150 30% 55%;
+  --wall-hover: 150 25% 65%;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+body {
+  margin: 0;
+  background-color: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Custom scrollbar - minimal and elegant */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.3);
+}
+
+/* Focus styles - subtle but accessible */
+:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 2px;
+}
+
+/* Smooth transitions */
+button, a, input, select {
+  transition: all 0.15s ease;
+}
