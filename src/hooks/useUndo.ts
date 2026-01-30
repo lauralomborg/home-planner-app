@@ -186,9 +186,10 @@ export function useUndo() {
 
 export function useKeyboardShortcuts() {
   const { undo, redo } = useUndo()
-  const { setActiveTool, clearSelection, toggleGrid, toggleSnapToGrid } = useEditorStore()
-  const { removeSelected } = useFloorPlanStore()
+  const { setActiveTool, clearSelection, toggleGrid, toggleSnapToGrid, copyToClipboard, select } = useEditorStore()
+  const { removeSelected, duplicateMultiple, moveMultipleFurniture } = useFloorPlanStore()
   const selectedIds = useEditorStore((state) => state.selectedIds)
+  const clipboard = useEditorStore((state) => state.clipboard)
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -213,6 +214,98 @@ export function useKeyboardShortcuts() {
       if ((isMeta && e.key === 'z' && e.shiftKey) || (isMeta && e.key === 'y')) {
         e.preventDefault()
         redo()
+        return
+      }
+
+      // Copy: Cmd/Ctrl + C
+      if (isMeta && e.key === 'c') {
+        e.preventDefault()
+        if (selectedIds.length > 0) {
+          const floorPlan = useFloorPlanStore.getState().floorPlan
+          const furnitureItems = floorPlan.furniture
+            .filter((f) => selectedIds.includes(f.id))
+            .map((f) => ({
+              catalogItemId: f.catalogItemId,
+              position: { ...f.position },
+              rotation: f.rotation,
+              dimensions: { ...f.dimensions },
+              partMaterials: { ...f.partMaterials },
+              locked: f.locked,
+            }))
+          if (furnitureItems.length > 0) {
+            copyToClipboard({ furnitureItems })
+          }
+        }
+        return
+      }
+
+      // Cut: Cmd/Ctrl + X
+      if (isMeta && e.key === 'x') {
+        e.preventDefault()
+        if (selectedIds.length > 0) {
+          const floorPlan = useFloorPlanStore.getState().floorPlan
+          const furnitureItems = floorPlan.furniture
+            .filter((f) => selectedIds.includes(f.id))
+            .map((f) => ({
+              catalogItemId: f.catalogItemId,
+              position: { ...f.position },
+              rotation: f.rotation,
+              dimensions: { ...f.dimensions },
+              partMaterials: { ...f.partMaterials },
+              locked: f.locked,
+            }))
+          if (furnitureItems.length > 0) {
+            copyToClipboard({ furnitureItems })
+          }
+          removeSelected(selectedIds)
+          clearSelection()
+        }
+        return
+      }
+
+      // Paste: Cmd/Ctrl + V
+      if (isMeta && e.key === 'v') {
+        e.preventDefault()
+        if (clipboard && clipboard.furnitureItems.length > 0) {
+          const { addFurniture } = useFloorPlanStore.getState()
+          const newIds: string[] = []
+          for (const item of clipboard.furnitureItems) {
+            const id = addFurniture({
+              catalogItemId: item.catalogItemId,
+              position: { x: item.position.x + 50, y: item.position.y + 50 },
+              rotation: item.rotation,
+              dimensions: { ...item.dimensions },
+              partMaterials: { ...item.partMaterials },
+              locked: false,
+            })
+            newIds.push(id)
+          }
+          select(newIds)
+        }
+        return
+      }
+
+      // Duplicate: Cmd/Ctrl + D
+      if (isMeta && e.key === 'd') {
+        e.preventDefault()
+        if (selectedIds.length > 0) {
+          const newIds = duplicateMultiple(selectedIds)
+          select(newIds)
+        }
+        return
+      }
+
+      // Arrow keys for nudge (no modifier = 1px, shift = 10px)
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key) && !isMeta) {
+        if (selectedIds.length > 0) {
+          e.preventDefault()
+          const amount = e.shiftKey ? 10 : 1
+          const delta = {
+            x: e.key === 'ArrowLeft' ? -amount : e.key === 'ArrowRight' ? amount : 0,
+            y: e.key === 'ArrowUp' ? -amount : e.key === 'ArrowDown' ? amount : 0,
+          }
+          moveMultipleFurniture(selectedIds, delta)
+        }
         return
       }
 
@@ -279,5 +372,5 @@ export function useKeyboardShortcuts() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [undo, redo, setActiveTool, clearSelection, toggleGrid, toggleSnapToGrid, selectedIds, removeSelected])
+  }, [undo, redo, setActiveTool, clearSelection, toggleGrid, toggleSnapToGrid, selectedIds, removeSelected, copyToClipboard, clipboard, duplicateMultiple, moveMultipleFurniture, select])
 }

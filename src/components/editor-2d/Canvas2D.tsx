@@ -1,5 +1,5 @@
 import { useRef, useCallback, useEffect, useState, useMemo } from 'react'
-import { Stage, Layer, Line, Rect, Circle, Group, Text, Tag, Label, Arc } from 'react-konva'
+import { Stage, Layer, Line, Rect, Circle, Group, Text, Tag, Label, Arc, Transformer } from 'react-konva'
 import type { KonvaEventObject } from 'konva/lib/Node'
 import type Konva from 'konva'
 import { useFloorPlanStore, useEditorStore } from '@/stores'
@@ -9,6 +9,30 @@ import { getPolygonFromWalls, getPolygonCentroid } from '@/services/geometry'
 import { FURNITURE_CATALOG } from '@/services/catalog'
 
 const GRID_SIZE = 50 // 50cm grid
+
+// Handle selection with modifier keys (Figma-style)
+function handleSelectWithModifiers(
+  e: KonvaEventObject<MouseEvent>,
+  id: string,
+  select: (ids: string[]) => void,
+  addToSelection: (id: string) => void,
+  toggleSelection: (id: string) => void
+) {
+  e.cancelBubble = true // Prevent stage click from clearing selection
+  const isShift = e.evt.shiftKey
+  const isCmd = e.evt.metaKey || e.evt.ctrlKey
+
+  if (isCmd) {
+    // Cmd/Ctrl+click toggles selection
+    toggleSelection(id)
+  } else if (isShift) {
+    // Shift+click adds to selection
+    addToSelection(id)
+  } else {
+    // Regular click replaces selection
+    select([id])
+  }
+}
 
 // Nordic color palette
 const COLORS = {
@@ -184,7 +208,7 @@ function WallShape({
   isHovered: boolean
   scale: number
 }) {
-  const { select, setHovered, setIsDragging } = useEditorStore()
+  const { select, addToSelection, toggleSelection, setHovered, setIsDragging } = useEditorStore()
   const { moveWallEndpoint } = useFloorPlanStore()
 
   const dx = wall.end.x - wall.start.x
@@ -213,7 +237,7 @@ function WallShape({
         strokeWidth={wall.thickness}
         lineCap="round"
         lineJoin="round"
-        onClick={() => select([wall.id])}
+        onClick={(e) => handleSelectWithModifiers(e, wall.id, select, addToSelection, toggleSelection)}
         onMouseEnter={() => setHovered(wall.id)}
         onMouseLeave={() => setHovered(null)}
         hitStrokeWidth={Math.max(wall.thickness, 20)}
@@ -301,7 +325,7 @@ function WindowShape({
   isSelected: boolean
   scale: number
 }) {
-  const { select, setHovered, setIsDragging } = useEditorStore()
+  const { select, addToSelection, toggleSelection, setHovered, setIsDragging } = useEditorStore()
   const { updateWindow } = useFloorPlanStore()
 
   // Calculate window position on wall
@@ -352,7 +376,7 @@ function WindowShape({
       y={centerY}
       rotation={angle * (180 / Math.PI)}
       draggable
-      onClick={() => select([window.id])}
+      onClick={(e) => handleSelectWithModifiers(e, window.id, select, addToSelection, toggleSelection)}
       onDragStart={() => setIsDragging(true)}
       onDragMove={handleDragMove}
       onDragEnd={() => setIsDragging(false)}
@@ -400,7 +424,7 @@ function DoorShape({
   isSelected: boolean
   scale: number
 }) {
-  const { select, setHovered, setIsDragging } = useEditorStore()
+  const { select, addToSelection, toggleSelection, setHovered, setIsDragging } = useEditorStore()
   const { updateDoor } = useFloorPlanStore()
 
   const dx = wall.end.x - wall.start.x
@@ -450,7 +474,7 @@ function DoorShape({
       y={centerY}
       rotation={angle * (180 / Math.PI)}
       draggable
-      onClick={() => select([door.id])}
+      onClick={(e) => handleSelectWithModifiers(e, door.id, select, addToSelection, toggleSelection)}
       onDragStart={() => setIsDragging(true)}
       onDragMove={handleDragMove}
       onDragEnd={() => setIsDragging(false)}
@@ -516,7 +540,7 @@ function RoomShape({
   isHovered: boolean
   scale: number
 }) {
-  const { select, setHovered } = useEditorStore()
+  const { select, addToSelection, toggleSelection, setHovered } = useEditorStore()
 
   const polygon = useMemo(() => {
     return getPolygonFromWalls(walls, room.wallIds)
@@ -539,7 +563,7 @@ function RoomShape({
         closed
         fill={fillColor}
         opacity={isSelected ? 0.5 : isHovered ? 0.4 : 0.3}
-        onClick={() => select([room.id])}
+        onClick={(e) => handleSelectWithModifiers(e, room.id, select, addToSelection, toggleSelection)}
         onMouseEnter={() => setHovered(room.id)}
         onMouseLeave={() => setHovered(null)}
       />
@@ -630,14 +654,40 @@ function WallPreview({
 }
 
 // Furniture shape component
-function FurnitureShape({ id, scale }: { id: string; scale: number }) {
+function FurnitureShape({
+  id,
+  scale,
+  onRegisterNode,
+  onUnregisterNode,
+}: {
+  id: string
+  scale: number
+  onRegisterNode: (id: string, node: Konva.Rect) => void
+  onUnregisterNode: (id: string) => void
+}) {
+  const shapeRef = useRef<Konva.Rect>(null)
   const furniture = useFloorPlanStore((state) =>
     state.floorPlan.furniture.find((f) => f.id === id)
   )
-  const { select, setHovered, setIsDragging } = useEditorStore()
-  const { moveFurniture } = useFloorPlanStore()
+  const { select, addToSelection, toggleSelection, setHovered, setIsDragging } = useEditorStore()
+  const selectedIds = useEditorStore((state) => state.selectedIds)
+  const { moveFurniture, moveMultipleFurniture, duplicateMultiple, resizeFurniture, rotateFurniture } = useFloorPlanStore()
   const isSelected = useEditorStore((state) => state.selectedIds.includes(id))
   const isHovered = useEditorStore((state) => state.hoveredId === id)
+
+  // Track drag start position for multi-select drag
+  const dragStartPos = useRef<Point2D | null>(null)
+  const didAltDuplicate = useRef(false)
+
+  // Register/unregister node with transformer when selected
+  useEffect(() => {
+    if (isSelected && shapeRef.current) {
+      onRegisterNode(id, shapeRef.current)
+    } else {
+      onUnregisterNode(id)
+    }
+    return () => onUnregisterNode(id)
+  }, [isSelected, id, onRegisterNode, onUnregisterNode])
 
   if (!furniture) return null
 
@@ -649,6 +699,7 @@ function FurnitureShape({ id, scale }: { id: string; scale: number }) {
 
   return (
     <Rect
+      ref={shapeRef}
       x={furniture.position.x}
       y={furniture.position.y}
       width={furniture.dimensions.width}
@@ -662,14 +713,67 @@ function FurnitureShape({ id, scale }: { id: string; scale: number }) {
       strokeWidth={isSelected ? 2 / scale : 1 / scale}
       cornerRadius={4}
       draggable={!furniture.locked}
-      onClick={() => select([furniture.id])}
+      onClick={(e) => handleSelectWithModifiers(e, furniture.id, select, addToSelection, toggleSelection)}
       onMouseEnter={() => setHovered(furniture.id)}
       onMouseLeave={() => setHovered(null)}
-      onDragStart={() => setIsDragging(true)}
-      onDragMove={(e) => {
-        moveFurniture(furniture.id, { x: e.target.x(), y: e.target.y() })
+      onDragStart={(e) => {
+        setIsDragging(true)
+        dragStartPos.current = { x: furniture.position.x, y: furniture.position.y }
+        didAltDuplicate.current = false
+
+        // Alt+drag to duplicate
+        if (e.evt.altKey && isSelected) {
+          const idsToDuplicate = selectedIds.includes(id) ? selectedIds : [id]
+          const newIds = duplicateMultiple(idsToDuplicate)
+          select(newIds)
+          didAltDuplicate.current = true
+        }
       }}
-      onDragEnd={() => setIsDragging(false)}
+      onDragMove={(e) => {
+        const newPos = { x: e.target.x(), y: e.target.y() }
+
+        // If this item is selected and there are multiple selected, move all
+        if (isSelected && selectedIds.length > 1 && dragStartPos.current) {
+          const delta = {
+            x: newPos.x - dragStartPos.current.x,
+            y: newPos.y - dragStartPos.current.y,
+          }
+          // Move all other selected items by the delta
+          const otherIds = selectedIds.filter((sid) => sid !== id)
+          moveMultipleFurniture(otherIds, delta)
+          // Update this item
+          moveFurniture(id, newPos)
+          // Update drag start position for next move
+          dragStartPos.current = newPos
+        } else {
+          moveFurniture(id, newPos)
+        }
+      }}
+      onDragEnd={() => {
+        setIsDragging(false)
+        dragStartPos.current = null
+        didAltDuplicate.current = false
+      }}
+      onTransformEnd={() => {
+        // Get the transformed values
+        const node = shapeRef.current
+        if (!node) return
+
+        const scaleX = node.scaleX()
+        const scaleY = node.scaleY()
+
+        // Reset scale and update dimensions
+        node.scaleX(1)
+        node.scaleY(1)
+
+        resizeFurniture(id, {
+          width: Math.max(10, furniture.dimensions.width * scaleX),
+          depth: Math.max(10, furniture.dimensions.depth * scaleY),
+          height: furniture.dimensions.height,
+        })
+        moveFurniture(id, { x: node.x(), y: node.y() })
+        rotateFurniture(id, node.rotation())
+      }}
     />
   )
 }
@@ -697,12 +801,31 @@ function OriginMarker({ scale }: { scale: number }) {
 export function Canvas2D() {
   const containerRef = useRef<HTMLDivElement>(null)
   const stageRef = useRef<Konva.Stage>(null)
+  const transformerRef = useRef<Konva.Transformer>(null)
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 })
   const [isPanning, setIsPanning] = useState(false)
   const [lastPointerPos, setLastPointerPos] = useState<Point2D | null>(null)
   const [isSpaceHeld, setIsSpaceHeld] = useState(false)
   const [roomDrawStart, setRoomDrawStart] = useState<Point2D | null>(null)
   const [roomDrawPreview, setRoomDrawPreview] = useState<Point2D | null>(null)
+
+  // Track selected nodes for transformer
+  const selectedNodesRef = useRef<Map<string, Konva.Rect>>(new Map())
+
+  // Callbacks for registering/unregistering nodes with transformer
+  const handleRegisterNode = useCallback((id: string, node: Konva.Rect) => {
+    selectedNodesRef.current.set(id, node)
+    if (transformerRef.current) {
+      transformerRef.current.nodes(Array.from(selectedNodesRef.current.values()))
+    }
+  }, [])
+
+  const handleUnregisterNode = useCallback((id: string) => {
+    selectedNodesRef.current.delete(id)
+    if (transformerRef.current) {
+      transformerRef.current.nodes(Array.from(selectedNodesRef.current.values()))
+    }
+  }, [])
 
   // Store state
   const walls = useFloorPlanStore((state) => state.floorPlan.walls)
@@ -724,6 +847,9 @@ export function Canvas2D() {
     selectedIds,
     hoveredId,
     selectedFurnitureId,
+    isMarqueeSelecting,
+    marqueeStart,
+    marqueeEnd,
     setZoom2D,
     setPan2D,
     startWallDraw,
@@ -732,7 +858,76 @@ export function Canvas2D() {
     cancelWallDraw,
     clearSelection,
     setActiveTool,
+    select,
+    startMarquee,
+    updateMarquee,
+    finishMarquee,
   } = useEditorStore()
+
+  // Get items within a marquee rectangle
+  const getItemsInMarquee = useCallback((start: Point2D, end: Point2D): string[] => {
+    const minX = Math.min(start.x, end.x)
+    const maxX = Math.max(start.x, end.x)
+    const minY = Math.min(start.y, end.y)
+    const maxY = Math.max(start.y, end.y)
+
+    const ids: string[] = []
+
+    // Check furniture
+    for (const f of furniture) {
+      const fx = f.position.x
+      const fy = f.position.y
+      const hw = f.dimensions.width / 2
+      const hd = f.dimensions.depth / 2
+      // Simple AABB check (doesn't account for rotation, but good enough)
+      if (fx - hw < maxX && fx + hw > minX && fy - hd < maxY && fy + hd > minY) {
+        ids.push(f.id)
+      }
+    }
+
+    // Check walls (by midpoint)
+    for (const w of walls) {
+      const midX = (w.start.x + w.end.x) / 2
+      const midY = (w.start.y + w.end.y) / 2
+      if (midX >= minX && midX <= maxX && midY >= minY && midY <= maxY) {
+        ids.push(w.id)
+      }
+    }
+
+    // Check windows (by position along wall)
+    for (const win of windows) {
+      const wall = walls.find((w) => w.id === win.wallId)
+      if (wall) {
+        const dx = wall.end.x - wall.start.x
+        const dy = wall.end.y - wall.start.y
+        const length = Math.sqrt(dx * dx + dy * dy)
+        const t = win.position / length
+        const wx = wall.start.x + dx * t
+        const wy = wall.start.y + dy * t
+        if (wx >= minX && wx <= maxX && wy >= minY && wy <= maxY) {
+          ids.push(win.id)
+        }
+      }
+    }
+
+    // Check doors (by position along wall)
+    for (const door of doors) {
+      const wall = walls.find((w) => w.id === door.wallId)
+      if (wall) {
+        const dx = wall.end.x - wall.start.x
+        const dy = wall.end.y - wall.start.y
+        const length = Math.sqrt(dx * dx + dy * dy)
+        const t = door.position / length
+        const doorX = wall.start.x + dx * t
+        const doorY = wall.start.y + dy * t
+        if (doorX >= minX && doorX <= maxX && doorY >= minY && doorY <= maxY) {
+          ids.push(door.id)
+        }
+      }
+    }
+
+    return ids
+  }, [furniture, walls, windows, doors])
 
   // Find wall at position for window/door placement
   const findWallAtPosition = useCallback((pos: Point2D): { wall: Wall; position: number } | null => {
@@ -842,7 +1037,8 @@ export function Canvas2D() {
           })
         }
       } else if (activeTool === 'select') {
-        if (e.target === stage) {
+        // Only clear selection when clicking on empty stage without modifier keys
+        if (e.target === stage && !e.evt.shiftKey && !e.evt.metaKey && !e.evt.ctrlKey) {
           clearSelection()
         }
       }
@@ -902,8 +1098,20 @@ export function Canvas2D() {
         setRoomDrawStart(snappedPos)
         setRoomDrawPreview(snappedPos)
       }
+
+      // Select tool: start marquee selection on empty canvas
+      if (e.evt.button === 0 && activeTool === 'select' && e.target === stage) {
+        const pointerPos = stage.getPointerPosition()
+        if (!pointerPos) return
+
+        const worldPos = {
+          x: (pointerPos.x - pan2D.x) / zoom2D,
+          y: (pointerPos.y - pan2D.y) / zoom2D,
+        }
+        startMarquee(worldPos)
+      }
     },
-    [activeTool, isSpaceHeld, pan2D, zoom2D, snapEnabled]
+    [activeTool, isSpaceHeld, pan2D, zoom2D, snapEnabled, startMarquee]
   )
 
   // Handle mouse move
@@ -954,8 +1162,20 @@ export function Canvas2D() {
         const snappedPos = snapToGrid(worldPos, GRID_SIZE, snapEnabled)
         setRoomDrawPreview(snappedPos)
       }
+
+      // Handle marquee selection preview
+      if (isMarqueeSelecting) {
+        const pointerPos = stage.getPointerPosition()
+        if (!pointerPos) return
+
+        const worldPos = {
+          x: (pointerPos.x - pan2D.x) / zoom2D,
+          y: (pointerPos.y - pan2D.y) / zoom2D,
+        }
+        updateMarquee(worldPos)
+      }
     },
-    [isPanning, lastPointerPos, isDrawingWall, roomDrawStart, zoom2D, pan2D, snapEnabled, updateWallDrawPreview, setPan2D]
+    [isPanning, lastPointerPos, isDrawingWall, roomDrawStart, isMarqueeSelecting, zoom2D, pan2D, snapEnabled, updateWallDrawPreview, updateMarquee, setPan2D]
   )
 
   // Handle mouse up - stop panning or finish room draw
@@ -1021,8 +1241,23 @@ export function Canvas2D() {
         setRoomDrawStart(null)
         setRoomDrawPreview(null)
       }
+
+      // Finish marquee selection
+      if (isMarqueeSelecting && marqueeStart && marqueeEnd) {
+        const itemsInMarquee = getItemsInMarquee(marqueeStart, marqueeEnd)
+        if (itemsInMarquee.length > 0) {
+          // If shift is held, add to existing selection
+          if (e.evt.shiftKey) {
+            const newSelection = [...new Set([...selectedIds, ...itemsInMarquee])]
+            select(newSelection)
+          } else {
+            select(itemsInMarquee)
+          }
+        }
+        finishMarquee()
+      }
     },
-    [isPanning, roomDrawStart, roomDrawPreview, addWall, detectRooms]
+    [isPanning, roomDrawStart, roomDrawPreview, isMarqueeSelecting, marqueeStart, marqueeEnd, selectedIds, addWall, detectRooms, getItemsInMarquee, select, finishMarquee]
   )
 
   // Handle wheel for zoom
@@ -1095,6 +1330,10 @@ export function Canvas2D() {
           setRoomDrawStart(null)
           setRoomDrawPreview(null)
         }
+        // Cancel marquee selection if in progress
+        if (isMarqueeSelecting) {
+          finishMarquee()
+        }
         clearSelection()
         setActiveTool('select')
       }
@@ -1123,7 +1362,7 @@ export function Canvas2D() {
       window.removeEventListener('keydown', handleKeyDown)
       window.removeEventListener('keyup', handleKeyUp)
     }
-  }, [isDrawingWall, cancelWallDraw, clearSelection, selectedIds, removeSelected, setActiveTool, roomDrawStart, isPanning])
+  }, [isDrawingWall, cancelWallDraw, clearSelection, selectedIds, removeSelected, setActiveTool, roomDrawStart, isPanning, isMarqueeSelecting, finishMarquee])
 
   // Resize observer
   useEffect(() => {
@@ -1250,8 +1489,33 @@ export function Canvas2D() {
 
           {/* Furniture */}
           {furniture.map((f) => (
-            <FurnitureShape key={f.id} id={f.id} scale={zoom2D} />
+            <FurnitureShape
+              key={f.id}
+              id={f.id}
+              scale={zoom2D}
+              onRegisterNode={handleRegisterNode}
+              onUnregisterNode={handleUnregisterNode}
+            />
           ))}
+
+          {/* Transformer for resize/rotate handles */}
+          <Transformer
+            ref={transformerRef}
+            rotateEnabled={true}
+            rotateAnchorOffset={20 / zoom2D}
+            anchorSize={8 / zoom2D}
+            anchorStroke={COLORS.handle}
+            anchorFill={COLORS.handleFill}
+            anchorCornerRadius={2 / zoom2D}
+            borderStroke={COLORS.handle}
+            borderStrokeWidth={1 / zoom2D}
+            enabledAnchors={['top-left', 'top-right', 'bottom-left', 'bottom-right', 'top-center', 'bottom-center', 'middle-left', 'middle-right']}
+            boundBoxFunc={(oldBox, newBox) => {
+              // Constrain minimum size
+              if (newBox.width < 20 || newBox.height < 20) return oldBox
+              return newBox
+            }}
+          />
 
           {/* Wall drawing preview */}
           {isDrawingWall && wallDrawStart && wallDrawPreview && (
@@ -1275,6 +1539,22 @@ export function Canvas2D() {
               stroke={COLORS.wallPreview}
               strokeWidth={2 / zoom2D}
               dash={[8 / zoom2D, 4 / zoom2D]}
+              listening={false}
+            />
+          )}
+
+          {/* Marquee selection preview */}
+          {isMarqueeSelecting && marqueeStart && marqueeEnd && (
+            <Rect
+              x={Math.min(marqueeStart.x, marqueeEnd.x)}
+              y={Math.min(marqueeStart.y, marqueeEnd.y)}
+              width={Math.abs(marqueeEnd.x - marqueeStart.x)}
+              height={Math.abs(marqueeEnd.y - marqueeStart.y)}
+              fill="#5B8A72"
+              opacity={0.1}
+              stroke="#5B8A72"
+              strokeWidth={1 / zoom2D}
+              dash={[4 / zoom2D, 4 / zoom2D]}
               listening={false}
             />
           )}

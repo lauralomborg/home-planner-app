@@ -77,6 +77,10 @@ interface FloorPlanState {
   loadFloorPlan: (floorPlan: FloorPlan) => void
   removeSelected: (ids: string[]) => void
 
+  // Batch operations for multi-select
+  moveMultipleFurniture: (ids: string[], delta: Point2D) => void
+  duplicateMultiple: (ids: string[]) => string[]
+
   // Getters
   getWallById: (id: string) => Wall | undefined
   getRoomById: (id: string) => Room | undefined
@@ -505,6 +509,62 @@ export const useFloorPlanStore = create<FloorPlanState>()(
           (l) => !idSet.has(l.id)
         )
       })
+    },
+
+    // ==================== Batch Operations ====================
+
+    moveMultipleFurniture: (ids, delta) => {
+      set((state) => {
+        const idSet = new Set(ids)
+        for (const f of state.floorPlan.furniture) {
+          if (idSet.has(f.id) && !f.locked) {
+            f.position.x += delta.x
+            f.position.y += delta.y
+          }
+        }
+      })
+    },
+
+    duplicateMultiple: (ids) => {
+      const state = get()
+      const newIds: string[] = []
+
+      set((draft) => {
+        for (const id of ids) {
+          // Try furniture first
+          const furniture = state.floorPlan.furniture.find((f) => f.id === id)
+          if (furniture) {
+            const newId = crypto.randomUUID()
+            newIds.push(newId)
+            draft.floorPlan.furniture.push({
+              ...JSON.parse(JSON.stringify(furniture)),
+              id: newId,
+              position: {
+                x: furniture.position.x + 50,
+                y: furniture.position.y + 50,
+              },
+              locked: false,
+            })
+            continue
+          }
+
+          // Try walls (duplicating walls is trickier, offset both endpoints)
+          const wall = state.floorPlan.walls.find((w) => w.id === id)
+          if (wall) {
+            const newId = crypto.randomUUID()
+            newIds.push(newId)
+            draft.floorPlan.walls.push({
+              ...JSON.parse(JSON.stringify(wall)),
+              id: newId,
+              start: { x: wall.start.x + 50, y: wall.start.y + 50 },
+              end: { x: wall.end.x + 50, y: wall.end.y + 50 },
+              openings: [], // Don't duplicate openings
+            })
+          }
+        }
+      })
+
+      return newIds
     },
 
     // ==================== Getters ====================

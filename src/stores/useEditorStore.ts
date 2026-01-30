@@ -22,6 +22,23 @@ interface EditorState {
   selectedIds: string[]
   hoveredId: string | null
 
+  // Marquee selection state
+  isMarqueeSelecting: boolean
+  marqueeStart: Point2D | null
+  marqueeEnd: Point2D | null
+
+  // Clipboard state
+  clipboard: {
+    furnitureItems: Array<{
+      catalogItemId: string
+      position: Point2D
+      rotation: number
+      dimensions: { width: number; depth: number; height: number }
+      partMaterials: Record<string, { materialId: string; colorOverride?: string }>
+      locked: boolean
+    }>
+  } | null
+
   // History (for undo/redo)
   canUndo: boolean
   canRedo: boolean
@@ -54,6 +71,16 @@ interface EditorState {
   clearSelection: () => void
   setHovered: (id: string | null) => void
 
+  // Marquee selection actions
+  startMarquee: (start: Point2D) => void
+  updateMarquee: (end: Point2D) => void
+  finishMarquee: () => void
+  cancelMarquee: () => void
+
+  // Clipboard actions
+  copyToClipboard: (items: EditorState['clipboard']) => void
+  clearClipboard: () => void
+
   // History actions
   setCanUndo: (canUndo: boolean) => void
   setCanRedo: (canRedo: boolean) => void
@@ -84,6 +111,12 @@ export const useEditorStore = create<EditorState>()(
 
     selectedIds: [],
     hoveredId: null,
+
+    isMarqueeSelecting: false,
+    marqueeStart: null,
+    marqueeEnd: null,
+
+    clipboard: null,
 
     canUndo: false,
     canRedo: false,
@@ -227,6 +260,52 @@ export const useEditorStore = create<EditorState>()(
     setHovered: (id) => {
       set((state) => {
         state.hoveredId = id
+      })
+    },
+
+    // ==================== Marquee Selection Actions ====================
+
+    startMarquee: (start) => {
+      set((state) => {
+        state.isMarqueeSelecting = true
+        state.marqueeStart = start
+        state.marqueeEnd = start
+      })
+    },
+
+    updateMarquee: (end) => {
+      set((state) => {
+        state.marqueeEnd = end
+      })
+    },
+
+    finishMarquee: () => {
+      set((state) => {
+        state.isMarqueeSelecting = false
+        state.marqueeStart = null
+        state.marqueeEnd = null
+      })
+    },
+
+    cancelMarquee: () => {
+      set((state) => {
+        state.isMarqueeSelecting = false
+        state.marqueeStart = null
+        state.marqueeEnd = null
+      })
+    },
+
+    // ==================== Clipboard Actions ====================
+
+    copyToClipboard: (items) => {
+      set((state) => {
+        state.clipboard = items
+      })
+    },
+
+    clearClipboard: () => {
+      set((state) => {
+        state.clipboard = null
       })
     },
 
