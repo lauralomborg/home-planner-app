@@ -3,7 +3,7 @@ import { Stage, Layer, Line, Rect, Circle, Group, Text, Tag, Label, Arc, Transfo
 import type { KonvaEventObject } from 'konva/lib/Node'
 import type Konva from 'konva'
 import { useFloorPlanStore, useEditorStore } from '@/stores'
-import type { Point2D, Wall, Room, WindowInstance, DoorInstance } from '@/models'
+import type { Point2D, Wall, Room, WindowInstance, DoorInstance, FurnitureInstance } from '@/models'
 import { DEFAULT_WALL_THICKNESS, DEFAULT_WALL_HEIGHT, DEFAULT_WINDOW_HEIGHT, DEFAULT_WINDOW_ELEVATION, DEFAULT_DOOR_HEIGHT } from '@/models'
 import { getPolygonFromWalls, getPolygonCentroid } from '@/services/geometry'
 import { FURNITURE_CATALOG } from '@/services/catalog'
@@ -653,25 +653,125 @@ function WallPreview({
   )
 }
 
+// Smart alignment guide calculation
+interface AlignmentGuide {
+  type: 'horizontal' | 'vertical'
+  position: number // x for vertical, y for horizontal
+  start: number // start of line
+  end: number // end of line
+}
+
+const SNAP_THRESHOLD = 8 // pixels
+
+function calculateAlignmentGuides(
+  draggedItems: FurnitureInstance[],
+  otherItems: FurnitureInstance[],
+  scale: number
+): { guides: AlignmentGuide[]; snapDelta: Point2D } {
+  const guides: AlignmentGuide[] = []
+  let snapDeltaX = 0
+  let snapDeltaY = 0
+  const threshold = SNAP_THRESHOLD / scale
+
+  // Get bounding box of dragged items
+  if (draggedItems.length === 0) return { guides, snapDelta: { x: 0, y: 0 } }
+
+  const draggedBounds = {
+    left: Math.min(...draggedItems.map((f) => f.position.x - f.dimensions.width / 2)),
+    right: Math.max(...draggedItems.map((f) => f.position.x + f.dimensions.width / 2)),
+    top: Math.min(...draggedItems.map((f) => f.position.y - f.dimensions.depth / 2)),
+    bottom: Math.max(...draggedItems.map((f) => f.position.y + f.dimensions.depth / 2)),
+  }
+  const draggedCenterX = (draggedBounds.left + draggedBounds.right) / 2
+  const draggedCenterY = (draggedBounds.top + draggedBounds.bottom) / 2
+
+  // Check alignment with other items
+  for (const other of otherItems) {
+    const otherBounds = {
+      left: other.position.x - other.dimensions.width / 2,
+      right: other.position.x + other.dimensions.width / 2,
+      top: other.position.y - other.dimensions.depth / 2,
+      bottom: other.position.y + other.dimensions.depth / 2,
+    }
+    const otherCenterX = other.position.x
+    const otherCenterY = other.position.y
+
+    // Vertical guides (for X alignment)
+    const verticalChecks = [
+      { dragged: draggedBounds.left, other: otherBounds.left, label: 'left-left' },
+      { dragged: draggedBounds.right, other: otherBounds.right, label: 'right-right' },
+      { dragged: draggedBounds.left, other: otherBounds.right, label: 'left-right' },
+      { dragged: draggedBounds.right, other: otherBounds.left, label: 'right-left' },
+      { dragged: draggedCenterX, other: otherCenterX, label: 'center-center' },
+    ]
+
+    for (const check of verticalChecks) {
+      const diff = check.other - check.dragged
+      if (Math.abs(diff) < threshold) {
+        if (snapDeltaX === 0) snapDeltaX = diff
+        guides.push({
+          type: 'vertical',
+          position: check.other,
+          start: Math.min(draggedBounds.top, otherBounds.top) - 20,
+          end: Math.max(draggedBounds.bottom, otherBounds.bottom) + 20,
+        })
+      }
+    }
+
+    // Horizontal guides (for Y alignment)
+    const horizontalChecks = [
+      { dragged: draggedBounds.top, other: otherBounds.top, label: 'top-top' },
+      { dragged: draggedBounds.bottom, other: otherBounds.bottom, label: 'bottom-bottom' },
+      { dragged: draggedBounds.top, other: otherBounds.bottom, label: 'top-bottom' },
+      { dragged: draggedBounds.bottom, other: otherBounds.top, label: 'bottom-top' },
+      { dragged: draggedCenterY, other: otherCenterY, label: 'center-center' },
+    ]
+
+    for (const check of horizontalChecks) {
+      const diff = check.other - check.dragged
+      if (Math.abs(diff) < threshold) {
+        if (snapDeltaY === 0) snapDeltaY = diff
+        guides.push({
+          type: 'horizontal',
+          position: check.other,
+          start: Math.min(draggedBounds.left, otherBounds.left) - 20,
+          end: Math.max(draggedBounds.right, otherBounds.right) + 20,
+        })
+      }
+    }
+  }
+
+  return { guides, snapDelta: { x: snapDeltaX, y: snapDeltaY } }
+}
+
+// Colors for grouping
+const GROUP_COLORS = {
+  indicator: '#9B59B6', // Purple indicator for grouped items
+  editMode: '#E8DAEF', // Light purple background when editing group
+}
+
 // Furniture shape component
 function FurnitureShape({
   id,
   scale,
   onRegisterNode,
   onUnregisterNode,
+  onDragUpdate,
 }: {
   id: string
   scale: number
   onRegisterNode: (id: string, node: Konva.Rect) => void
   onUnregisterNode: (id: string) => void
+  onDragUpdate: (isDragging: boolean, draggedIds: string[]) => void
 }) {
   const shapeRef = useRef<Konva.Rect>(null)
   const furniture = useFloorPlanStore((state) =>
     state.floorPlan.furniture.find((f) => f.id === id)
   )
-  const { select, addToSelection, toggleSelection, setHovered, setIsDragging } = useEditorStore()
+  const { select, addToSelection, toggleSelection, setHovered, setIsDragging, enterGroupEdit } = useEditorStore()
   const selectedIds = useEditorStore((state) => state.selectedIds)
-  const { moveFurniture, moveMultipleFurniture, duplicateMultiple, resizeFurniture, rotateFurniture } = useFloorPlanStore()
+  const editingGroupId = useEditorStore((state) => state.editingGroupId)
+  const { moveFurniture, moveMultipleFurniture, duplicateMultiple, resizeFurniture, rotateFurniture, getGroupForItem, getGroupMembers } = useFloorPlanStore()
   const isSelected = useEditorStore((state) => state.selectedIds.includes(id))
   const isHovered = useEditorStore((state) => state.hoveredId === id)
 
@@ -691,6 +791,35 @@ function FurnitureShape({
 
   if (!furniture) return null
 
+  const group = getGroupForItem(id)
+  const isGrouped = !!group
+  const isInEditMode = editingGroupId === group?.id
+
+  // Handle click with group awareness
+  const handleClick = (e: KonvaEventObject<MouseEvent>) => {
+    e.cancelBubble = true
+    const isShift = e.evt.shiftKey
+    const isCmd = e.evt.metaKey || e.evt.ctrlKey
+
+    // If item is grouped and we're not in edit mode, select the whole group
+    if (isGrouped && !isInEditMode && !isShift && !isCmd) {
+      const members = getGroupMembers(group!.id)
+      select(members.map((m) => m.id))
+    } else {
+      // Normal selection behavior
+      handleSelectWithModifiers(e, furniture.id, select, addToSelection, toggleSelection)
+    }
+  }
+
+  // Handle double-click to enter group edit mode
+  const handleDblClick = (e: KonvaEventObject<MouseEvent>) => {
+    e.cancelBubble = true
+    if (isGrouped && !isInEditMode) {
+      enterGroupEdit(group!.id)
+      select([id]) // Select just this item when entering edit mode
+    }
+  }
+
   const color = isSelected
     ? COLORS.furnitureSelected
     : isHovered
@@ -698,83 +827,111 @@ function FurnitureShape({
     : COLORS.furniture
 
   return (
-    <Rect
-      ref={shapeRef}
-      x={furniture.position.x}
-      y={furniture.position.y}
-      width={furniture.dimensions.width}
-      height={furniture.dimensions.depth}
-      offsetX={furniture.dimensions.width / 2}
-      offsetY={furniture.dimensions.depth / 2}
-      rotation={furniture.rotation}
-      fill={color}
-      opacity={0.8}
-      stroke={isSelected ? COLORS.wallSelected : color}
-      strokeWidth={isSelected ? 2 / scale : 1 / scale}
-      cornerRadius={4}
-      draggable={!furniture.locked}
-      onClick={(e) => handleSelectWithModifiers(e, furniture.id, select, addToSelection, toggleSelection)}
-      onMouseEnter={() => setHovered(furniture.id)}
-      onMouseLeave={() => setHovered(null)}
-      onDragStart={(e) => {
-        setIsDragging(true)
-        dragStartPos.current = { x: furniture.position.x, y: furniture.position.y }
-        didAltDuplicate.current = false
+    <Group>
+      {/* Group indicator badge */}
+      {isGrouped && !isInEditMode && (
+        <Circle
+          x={furniture.position.x + furniture.dimensions.width / 2 - 8 / scale}
+          y={furniture.position.y - furniture.dimensions.depth / 2 + 8 / scale}
+          radius={6 / scale}
+          fill={GROUP_COLORS.indicator}
+          stroke="#FFFFFF"
+          strokeWidth={1 / scale}
+          listening={false}
+        />
+      )}
+      <Rect
+        ref={shapeRef}
+        x={furniture.position.x}
+        y={furniture.position.y}
+        width={furniture.dimensions.width}
+        height={furniture.dimensions.depth}
+        offsetX={furniture.dimensions.width / 2}
+        offsetY={furniture.dimensions.depth / 2}
+        rotation={furniture.rotation}
+        fill={color}
+        opacity={0.8}
+        stroke={isSelected ? COLORS.wallSelected : isGrouped && !isInEditMode ? GROUP_COLORS.indicator : color}
+        strokeWidth={isSelected ? 2 / scale : 1 / scale}
+        cornerRadius={4}
+        draggable={!furniture.locked}
+        onClick={handleClick}
+        onDblClick={handleDblClick}
+        onMouseEnter={() => setHovered(furniture.id)}
+        onMouseLeave={() => setHovered(null)}
+        onDragStart={(e) => {
+          setIsDragging(true)
+          dragStartPos.current = { x: furniture.position.x, y: furniture.position.y }
+          didAltDuplicate.current = false
 
-        // Alt+drag to duplicate
-        if (e.evt.altKey && isSelected) {
-          const idsToDuplicate = selectedIds.includes(id) ? selectedIds : [id]
-          const newIds = duplicateMultiple(idsToDuplicate)
-          select(newIds)
-          didAltDuplicate.current = true
-        }
-      }}
-      onDragMove={(e) => {
-        const newPos = { x: e.target.x(), y: e.target.y() }
-
-        // If this item is selected and there are multiple selected, move all
-        if (isSelected && selectedIds.length > 1 && dragStartPos.current) {
-          const delta = {
-            x: newPos.x - dragStartPos.current.x,
-            y: newPos.y - dragStartPos.current.y,
+          // Determine what items we're dragging
+          let dragIds = [id]
+          if (isSelected && selectedIds.length > 1) {
+            dragIds = selectedIds
+          } else if (isGrouped && !isInEditMode) {
+            // Drag whole group
+            const members = getGroupMembers(group!.id)
+            dragIds = members.map((m) => m.id)
+            select(dragIds)
           }
-          // Move all other selected items by the delta
-          const otherIds = selectedIds.filter((sid) => sid !== id)
-          moveMultipleFurniture(otherIds, delta)
-          // Update this item
-          moveFurniture(id, newPos)
-          // Update drag start position for next move
-          dragStartPos.current = newPos
-        } else {
-          moveFurniture(id, newPos)
-        }
-      }}
-      onDragEnd={() => {
-        setIsDragging(false)
-        dragStartPos.current = null
-        didAltDuplicate.current = false
-      }}
-      onTransformEnd={() => {
-        // Get the transformed values
-        const node = shapeRef.current
-        if (!node) return
 
-        const scaleX = node.scaleX()
-        const scaleY = node.scaleY()
+          // Alt+drag to duplicate
+          if (e.evt.altKey) {
+            const newIds = duplicateMultiple(dragIds)
+            select(newIds)
+            didAltDuplicate.current = true
+          }
 
-        // Reset scale and update dimensions
-        node.scaleX(1)
-        node.scaleY(1)
+          onDragUpdate(true, dragIds)
+        }}
+        onDragMove={(e) => {
+          const newPos = { x: e.target.x(), y: e.target.y() }
 
-        resizeFurniture(id, {
-          width: Math.max(10, furniture.dimensions.width * scaleX),
-          depth: Math.max(10, furniture.dimensions.depth * scaleY),
-          height: furniture.dimensions.height,
-        })
-        moveFurniture(id, { x: node.x(), y: node.y() })
-        rotateFurniture(id, node.rotation())
-      }}
-    />
+          // If this item is selected and there are multiple selected, move all
+          if (isSelected && selectedIds.length > 1 && dragStartPos.current) {
+            const delta = {
+              x: newPos.x - dragStartPos.current.x,
+              y: newPos.y - dragStartPos.current.y,
+            }
+            // Move all other selected items by the delta
+            const otherIds = selectedIds.filter((sid) => sid !== id)
+            moveMultipleFurniture(otherIds, delta)
+            // Update this item
+            moveFurniture(id, newPos)
+            // Update drag start position for next move
+            dragStartPos.current = newPos
+          } else {
+            moveFurniture(id, newPos)
+          }
+        }}
+        onDragEnd={() => {
+          setIsDragging(false)
+          dragStartPos.current = null
+          didAltDuplicate.current = false
+          onDragUpdate(false, [])
+        }}
+        onTransformEnd={() => {
+          // Get the transformed values
+          const node = shapeRef.current
+          if (!node) return
+
+          const scaleX = node.scaleX()
+          const scaleY = node.scaleY()
+
+          // Reset scale and update dimensions
+          node.scaleX(1)
+          node.scaleY(1)
+
+          resizeFurniture(id, {
+            width: Math.max(10, furniture.dimensions.width * scaleX),
+            depth: Math.max(10, furniture.dimensions.depth * scaleY),
+            height: furniture.dimensions.height,
+          })
+          moveFurniture(id, { x: node.x(), y: node.y() })
+          rotateFurniture(id, node.rotation())
+        }}
+      />
+    </Group>
   )
 }
 
@@ -809,6 +966,11 @@ export function Canvas2D() {
   const [roomDrawStart, setRoomDrawStart] = useState<Point2D | null>(null)
   const [roomDrawPreview, setRoomDrawPreview] = useState<Point2D | null>(null)
 
+  // Smart alignment guides state
+  const [alignmentGuides, setAlignmentGuides] = useState<AlignmentGuide[]>([])
+  const [isDraggingFurniture, setIsDraggingFurniture] = useState(false)
+  const draggedIdsRef = useRef<string[]>([])
+
   // Track selected nodes for transformer
   const selectedNodesRef = useRef<Map<string, Konva.Rect>>(new Map())
 
@@ -824,6 +986,15 @@ export function Canvas2D() {
     selectedNodesRef.current.delete(id)
     if (transformerRef.current) {
       transformerRef.current.nodes(Array.from(selectedNodesRef.current.values()))
+    }
+  }, [])
+
+  // Handle furniture drag updates for smart guides
+  const handleFurnitureDragUpdate = useCallback((isDragging: boolean, draggedIds: string[]) => {
+    setIsDraggingFurniture(isDragging)
+    draggedIdsRef.current = draggedIds
+    if (!isDragging) {
+      setAlignmentGuides([])
     }
   }, [])
 
@@ -1364,6 +1535,20 @@ export function Canvas2D() {
     }
   }, [isDrawingWall, cancelWallDraw, clearSelection, selectedIds, removeSelected, setActiveTool, roomDrawStart, isPanning, isMarqueeSelecting, finishMarquee])
 
+  // Calculate alignment guides during furniture drag
+  useEffect(() => {
+    if (!isDraggingFurniture || draggedIdsRef.current.length === 0) {
+      return
+    }
+
+    const draggedIdSet = new Set(draggedIdsRef.current)
+    const draggedItems = furniture.filter((f) => draggedIdSet.has(f.id))
+    const otherItems = furniture.filter((f) => !draggedIdSet.has(f.id))
+
+    const { guides } = calculateAlignmentGuides(draggedItems, otherItems, zoom2D)
+    setAlignmentGuides(guides)
+  }, [isDraggingFurniture, furniture, zoom2D])
+
   // Resize observer
   useEffect(() => {
     const container = containerRef.current
@@ -1495,6 +1680,7 @@ export function Canvas2D() {
               scale={zoom2D}
               onRegisterNode={handleRegisterNode}
               onUnregisterNode={handleUnregisterNode}
+              onDragUpdate={handleFurnitureDragUpdate}
             />
           ))}
 
@@ -1558,6 +1744,22 @@ export function Canvas2D() {
               listening={false}
             />
           )}
+
+          {/* Smart alignment guides */}
+          {alignmentGuides.map((guide, index) => (
+            <Line
+              key={`guide-${index}`}
+              points={
+                guide.type === 'vertical'
+                  ? [guide.position, guide.start, guide.position, guide.end]
+                  : [guide.start, guide.position, guide.end, guide.position]
+              }
+              stroke="#E74C3C"
+              strokeWidth={1 / zoom2D}
+              dash={[4 / zoom2D, 4 / zoom2D]}
+              listening={false}
+            />
+          ))}
         </Layer>
       </Stage>
     </div>

@@ -163,6 +163,18 @@ export interface FurnitureInstance {
   dimensions: Dimensions3D
   partMaterials: Record<string, MaterialRef> // partName -> material
   locked: boolean
+  groupId?: string // Reference to parent group
+}
+
+// ============================================
+// Grouping Types
+// ============================================
+
+export interface FurnitureGroup {
+  id: string
+  name: string
+  memberIds: string[] // IDs of furniture items in this group
+  locked: boolean
 }
 
 // ============================================
@@ -241,6 +253,7 @@ export interface FloorPlan {
   windows: WindowInstance[]
   doors: DoorInstance[]
   lights: LightInstance[]
+  groups: FurnitureGroup[]
 }
 
 // ============================================
@@ -340,6 +353,7 @@ export function createEmptyFloorPlan(): FloorPlan {
     windows: [],
     doors: [],
     lights: [],
+    groups: [],
   }
 }
 

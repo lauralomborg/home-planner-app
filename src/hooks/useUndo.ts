@@ -186,10 +186,11 @@ export function useUndo() {
 
 export function useKeyboardShortcuts() {
   const { undo, redo } = useUndo()
-  const { setActiveTool, clearSelection, toggleGrid, toggleSnapToGrid, copyToClipboard, select } = useEditorStore()
-  const { removeSelected, duplicateMultiple, moveMultipleFurniture } = useFloorPlanStore()
+  const { setActiveTool, clearSelection, toggleGrid, toggleSnapToGrid, copyToClipboard, select, exitGroupEdit } = useEditorStore()
+  const { removeSelected, duplicateMultiple, moveMultipleFurniture, createGroup, dissolveGroup, getGroupForItem } = useFloorPlanStore()
   const selectedIds = useEditorStore((state) => state.selectedIds)
   const clipboard = useEditorStore((state) => state.clipboard)
+  const editingGroupId = useEditorStore((state) => state.editingGroupId)
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -295,6 +296,39 @@ export function useKeyboardShortcuts() {
         return
       }
 
+      // Group: Cmd/Ctrl + G
+      if (isMeta && e.key === 'g' && !e.shiftKey) {
+        e.preventDefault()
+        if (selectedIds.length >= 2) {
+          const groupId = createGroup(selectedIds)
+          if (groupId) {
+            // Keep the items selected after grouping
+            select(selectedIds)
+          }
+        }
+        return
+      }
+
+      // Ungroup: Cmd/Ctrl + Shift + G
+      if (isMeta && e.key === 'g' && e.shiftKey) {
+        e.preventDefault()
+        if (selectedIds.length > 0) {
+          // Find all unique groups from selected items
+          const groupIds = new Set<string>()
+          for (const id of selectedIds) {
+            const group = getGroupForItem(id)
+            if (group) {
+              groupIds.add(group.id)
+            }
+          }
+          // Dissolve all found groups
+          for (const groupId of groupIds) {
+            dissolveGroup(groupId)
+          }
+        }
+        return
+      }
+
       // Arrow keys for nudge (no modifier = 1px, shift = 10px)
       if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key) && !isMeta) {
         if (selectedIds.length > 0) {
@@ -345,8 +379,12 @@ export function useKeyboardShortcuts() {
             }
             break
           case 'escape':
-            clearSelection()
-            setActiveTool('select')
+            if (editingGroupId) {
+              exitGroupEdit()
+            } else {
+              clearSelection()
+              setActiveTool('select')
+            }
             break
           case 'delete':
           case 'backspace':
@@ -372,5 +410,5 @@ export function useKeyboardShortcuts() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [undo, redo, setActiveTool, clearSelection, toggleGrid, toggleSnapToGrid, selectedIds, removeSelected, copyToClipboard, clipboard, duplicateMultiple, moveMultipleFurniture, select])
+  }, [undo, redo, setActiveTool, clearSelection, toggleGrid, toggleSnapToGrid, selectedIds, removeSelected, copyToClipboard, clipboard, duplicateMultiple, moveMultipleFurniture, select, createGroup, dissolveGroup, getGroupForItem, editingGroupId, exitGroupEdit])
 }

@@ -5,6 +5,7 @@ import type {
   Wall,
   Room,
   FurnitureInstance,
+  FurnitureGroup,
   WindowInstance,
   DoorInstance,
   LightInstance,
@@ -81,6 +82,13 @@ interface FloorPlanState {
   moveMultipleFurniture: (ids: string[], delta: Point2D) => void
   duplicateMultiple: (ids: string[]) => string[]
 
+  // Group operations
+  createGroup: (memberIds: string[], name?: string) => string | null
+  dissolveGroup: (groupId: string) => void
+  getGroupById: (groupId: string) => FurnitureGroup | undefined
+  getGroupForItem: (itemId: string) => FurnitureGroup | undefined
+  getGroupMembers: (groupId: string) => FurnitureInstance[]
+
   // Getters
   getWallById: (id: string) => Wall | undefined
   getRoomById: (id: string) => Room | undefined
@@ -100,6 +108,7 @@ export const useFloorPlanStore = create<FloorPlanState>()(
       windows: [],
       doors: [],
       lights: [],
+      groups: [],
     },
 
     // ==================== Wall Actions ====================
@@ -477,6 +486,7 @@ export const useFloorPlanStore = create<FloorPlanState>()(
           windows: [],
           doors: [],
           lights: [],
+          groups: [],
         }
       })
     },
@@ -565,6 +575,79 @@ export const useFloorPlanStore = create<FloorPlanState>()(
       })
 
       return newIds
+    },
+
+    // ==================== Group Operations ====================
+
+    createGroup: (memberIds, name) => {
+      // Need at least 2 items to form a group
+      if (memberIds.length < 2) return null
+
+      const state = get()
+      // Filter to only furniture items that exist and aren't already in a group
+      const validIds = memberIds.filter((id) => {
+        const furniture = state.floorPlan.furniture.find((f) => f.id === id)
+        return furniture && !furniture.groupId
+      })
+
+      if (validIds.length < 2) return null
+
+      const groupId = crypto.randomUUID()
+      const groupName = name || `Group ${state.floorPlan.groups.length + 1}`
+
+      set((draft) => {
+        // Create the group
+        draft.floorPlan.groups.push({
+          id: groupId,
+          name: groupName,
+          memberIds: validIds,
+          locked: false,
+        })
+
+        // Update furniture items with groupId
+        for (const f of draft.floorPlan.furniture) {
+          if (validIds.includes(f.id)) {
+            f.groupId = groupId
+          }
+        }
+      })
+
+      return groupId
+    },
+
+    dissolveGroup: (groupId) => {
+      set((draft) => {
+        // Remove groupId from all furniture in this group
+        for (const f of draft.floorPlan.furniture) {
+          if (f.groupId === groupId) {
+            delete f.groupId
+          }
+        }
+
+        // Remove the group
+        draft.floorPlan.groups = draft.floorPlan.groups.filter(
+          (g) => g.id !== groupId
+        )
+      })
+    },
+
+    getGroupById: (groupId) =>
+      get().floorPlan.groups.find((g) => g.id === groupId),
+
+    getGroupForItem: (itemId) => {
+      const state = get()
+      const furniture = state.floorPlan.furniture.find((f) => f.id === itemId)
+      if (!furniture?.groupId) return undefined
+      return state.floorPlan.groups.find((g) => g.id === furniture.groupId)
+    },
+
+    getGroupMembers: (groupId) => {
+      const state = get()
+      const group = state.floorPlan.groups.find((g) => g.id === groupId)
+      if (!group) return []
+      return state.floorPlan.furniture.filter((f) =>
+        group.memberIds.includes(f.id)
+      )
     },
 
     // ==================== Getters ====================

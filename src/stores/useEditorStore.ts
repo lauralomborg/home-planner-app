@@ -46,6 +46,9 @@ interface EditorState {
   // Drag state (to pause history capture during drag)
   isDragging: boolean
 
+  // Group editing state (when editing inside a group)
+  editingGroupId: string | null
+
   // View actions
   setActiveView: (view: ViewMode) => void
   setZoom2D: (zoom: number) => void
@@ -87,6 +90,10 @@ interface EditorState {
 
   // Drag actions
   setIsDragging: (dragging: boolean) => void
+
+  // Group editing actions
+  enterGroupEdit: (groupId: string) => void
+  exitGroupEdit: () => void
 }
 
 const DEFAULT_ZOOM = 1
@@ -122,6 +129,8 @@ export const useEditorStore = create<EditorState>()(
     canRedo: false,
 
     isDragging: false,
+
+    editingGroupId: null,
 
     // ==================== View Actions ====================
 
@@ -328,6 +337,22 @@ export const useEditorStore = create<EditorState>()(
     setIsDragging: (dragging) => {
       set((state) => {
         state.isDragging = dragging
+      })
+    },
+
+    // ==================== Group Editing Actions ====================
+
+    enterGroupEdit: (groupId) => {
+      set((state) => {
+        state.editingGroupId = groupId
+        state.selectedIds = [] // Clear selection when entering group
+      })
+    },
+
+    exitGroupEdit: () => {
+      set((state) => {
+        state.editingGroupId = null
+        state.selectedIds = []
       })
     },
   }))
