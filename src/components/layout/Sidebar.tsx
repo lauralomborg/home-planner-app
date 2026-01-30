@@ -184,11 +184,7 @@ function FurnitureCatalogPanel() {
   }
 
   return (
-    <div className="mt-6">
-      <h4 className="text-[11px] font-semibold text-muted-foreground/70 uppercase tracking-widest mb-3">
-        Furniture
-      </h4>
-
+    <div>
       {/* Category tabs */}
       <div className="flex flex-wrap gap-1 mb-3">
         {FURNITURE_CATEGORIES.map((cat) => (
@@ -263,6 +259,7 @@ export function Sidebar() {
     useEditorStore()
   const { removeSelected, updateWall, floorPlan } = useFloorPlanStore()
   const [materialCategory, setMaterialCategory] = useState<MaterialCategoryTab>('paints')
+  const activeTool = useActiveTool()
 
   const handleDelete = () => {
     removeSelected(selectedIds)
@@ -409,83 +406,97 @@ export function Sidebar() {
         </>
       )}
 
-      {/* Materials Section */}
+      {/* Materials/Furniture Section */}
       <div className="flex-1 flex flex-col min-h-0">
-        <div className="p-4 pb-2">
-          <h3 className="text-[11px] font-semibold text-muted-foreground/70 uppercase tracking-widest px-1 mb-3">
-            Wall Materials
-          </h3>
+        {activeTool === 'furniture' ? (
+          /* Furniture Catalog - shown when furniture tool is active */
+          <>
+            <div className="p-4 pb-2">
+              <h3 className="text-[11px] font-semibold text-muted-foreground/70 uppercase tracking-widest px-1 mb-3">
+                Furniture Catalog
+              </h3>
+            </div>
+            <ScrollArea className="flex-1 px-4 pb-4">
+              <FurnitureCatalogPanel />
+            </ScrollArea>
+          </>
+        ) : (
+          /* Wall Materials - shown for other tools */
+          <>
+            <div className="p-4 pb-2">
+              <h3 className="text-[11px] font-semibold text-muted-foreground/70 uppercase tracking-widest px-1 mb-3">
+                Wall Materials
+              </h3>
 
-          {/* Material Category Tabs */}
-          <div className="flex gap-1 bg-muted/50 p-1 rounded-lg mb-3">
-            {(['paints', 'finishes', 'accent'] as const).map((cat) => (
-              <button
-                key={cat}
-                onClick={() => setMaterialCategory(cat)}
-                className={cn(
-                  'flex-1 text-xs py-1.5 rounded-md transition-all capitalize',
-                  materialCategory === cat
-                    ? 'bg-background shadow-sm text-foreground'
-                    : 'text-muted-foreground hover:text-foreground'
-                )}
-              >
-                {cat}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <ScrollArea className="flex-1 px-4 pb-4">
-          <div className="grid grid-cols-4 gap-1.5">
-            {WALL_MATERIALS[materialCategory].map((material) => (
-              <button
-                key={material.id}
-                onClick={() => applyMaterial(material.color)}
-                className={cn(
-                  'w-full aspect-square rounded-lg border-2 hover:scale-105 transition-all relative group',
-                  selectedWalls.some((w) => w.material.colorOverride === material.color)
-                    ? 'border-primary ring-2 ring-primary/20'
-                    : 'border-border/40 hover:border-border'
-                )}
-                style={{ backgroundColor: material.color }}
-                title={material.name}
-              >
-                {/* Texture indicator */}
-                {'texture' in material && (
-                  <div className="absolute inset-0 opacity-30 rounded-lg overflow-hidden">
-                    {material.texture === 'limewash' && (
-                      <div className="w-full h-full bg-gradient-to-br from-transparent via-white/20 to-transparent" />
+              {/* Material Category Tabs */}
+              <div className="flex gap-1 bg-muted/50 p-1 rounded-lg mb-3">
+                {(['paints', 'finishes', 'accent'] as const).map((cat) => (
+                  <button
+                    key={cat}
+                    onClick={() => setMaterialCategory(cat)}
+                    className={cn(
+                      'flex-1 text-xs py-1.5 rounded-md transition-all capitalize',
+                      materialCategory === cat
+                        ? 'bg-background shadow-sm text-foreground'
+                        : 'text-muted-foreground hover:text-foreground'
                     )}
-                    {material.texture === 'brick' && (
-                      <div className="w-full h-full"
-                        style={{
-                          backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,0.1) 3px, rgba(0,0,0,0.1) 4px)',
-                        }}
-                      />
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <ScrollArea className="flex-1 px-4 pb-4">
+              <div className="grid grid-cols-4 gap-1.5">
+                {WALL_MATERIALS[materialCategory].map((material) => (
+                  <button
+                    key={material.id}
+                    onClick={() => applyMaterial(material.color)}
+                    className={cn(
+                      'w-full aspect-square rounded-lg border-2 hover:scale-105 transition-all relative group',
+                      selectedWalls.some((w) => w.material.colorOverride === material.color)
+                        ? 'border-primary ring-2 ring-primary/20'
+                        : 'border-border/40 hover:border-border'
                     )}
-                    {material.texture === 'concrete' && (
-                      <div className="w-full h-full bg-[radial-gradient(circle,rgba(0,0,0,0.05)_1px,transparent_1px)] bg-[length:4px_4px]" />
+                    style={{ backgroundColor: material.color }}
+                    title={material.name}
+                  >
+                    {/* Texture indicator */}
+                    {'texture' in material && (
+                      <div className="absolute inset-0 opacity-30 rounded-lg overflow-hidden">
+                        {material.texture === 'limewash' && (
+                          <div className="w-full h-full bg-gradient-to-br from-transparent via-white/20 to-transparent" />
+                        )}
+                        {material.texture === 'brick' && (
+                          <div className="w-full h-full"
+                            style={{
+                              backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,0.1) 3px, rgba(0,0,0,0.1) 4px)',
+                            }}
+                          />
+                        )}
+                        {material.texture === 'concrete' && (
+                          <div className="w-full h-full bg-[radial-gradient(circle,rgba(0,0,0,0.05)_1px,transparent_1px)] bg-[length:4px_4px]" />
+                        )}
+                      </div>
                     )}
-                  </div>
-                )}
 
-                {/* Tooltip on hover */}
-                <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-foreground text-background text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-10">
-                  {material.name}
-                </div>
-              </button>
-            ))}
-          </div>
+                    {/* Tooltip on hover */}
+                    <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-foreground text-background text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap pointer-events-none z-10">
+                      {material.name}
+                    </div>
+                  </button>
+                ))}
+              </div>
 
-          {selectedWalls.length === 0 && (
-            <p className="text-xs text-muted-foreground/60 text-center mt-4">
-              Select a wall to apply materials
-            </p>
-          )}
-
-          {/* Furniture Catalog */}
-          <FurnitureCatalogPanel />
-        </ScrollArea>
+              {selectedWalls.length === 0 && (
+                <p className="text-xs text-muted-foreground/60 text-center mt-4">
+                  Select a wall to apply materials
+                </p>
+              )}
+            </ScrollArea>
+          </>
+        )}
       </div>
     </aside>
   )
