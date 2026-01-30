@@ -28,6 +28,7 @@ export function useUndo() {
   const floorPlan = useFloorPlanStore((state) => state.floorPlan)
   const loadFloorPlan = useFloorPlanStore((state) => state.loadFloorPlan)
   const selectedIds = useEditorStore((state) => state.selectedIds)
+  const isDragging = useEditorStore((state) => state.isDragging)
   const { setCanUndo, setCanRedo, select } = useEditorStore()
 
   // Track if this is a selection-only change
@@ -36,6 +37,7 @@ export function useUndo() {
   // Track changes and add to history
   useEffect(() => {
     if (isUndoRedoing) return
+    if (isDragging) return  // Skip history capture during drag operations
 
     const currentFloorPlanStr = JSON.stringify(floorPlan)
     const currentSelectedIdsStr = JSON.stringify(selectedIds)
@@ -96,7 +98,7 @@ export function useUndo() {
         selectionDebounceTimer = null
       }, SELECTION_DEBOUNCE_MS)
     }
-  }, [floorPlan, selectedIds, setCanUndo, setCanRedo])
+  }, [floorPlan, selectedIds, isDragging, setCanUndo, setCanRedo])
 
   const undo = useCallback(() => {
     if (history.past.length === 0) return

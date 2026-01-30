@@ -184,7 +184,7 @@ function WallShape({
   isHovered: boolean
   scale: number
 }) {
-  const { select, setHovered } = useEditorStore()
+  const { select, setHovered, setIsDragging } = useEditorStore()
   const { moveWallEndpoint } = useFloorPlanStore()
 
   const dx = wall.end.x - wall.start.x
@@ -241,12 +241,14 @@ function WallShape({
             stroke={COLORS.handle}
             strokeWidth={2 / scale}
             draggable
+            onDragStart={() => setIsDragging(true)}
             onDragMove={(e) => {
               moveWallEndpoint(wall.id, 'start', {
                 x: e.target.x(),
                 y: e.target.y(),
               })
             }}
+            onDragEnd={() => setIsDragging(false)}
             onMouseEnter={(e) => {
               const stage = e.target.getStage()
               if (stage) stage.container().style.cursor = 'move'
@@ -264,12 +266,14 @@ function WallShape({
             stroke={COLORS.handle}
             strokeWidth={2 / scale}
             draggable
+            onDragStart={() => setIsDragging(true)}
             onDragMove={(e) => {
               moveWallEndpoint(wall.id, 'end', {
                 x: e.target.x(),
                 y: e.target.y(),
               })
             }}
+            onDragEnd={() => setIsDragging(false)}
             onMouseEnter={(e) => {
               const stage = e.target.getStage()
               if (stage) stage.container().style.cursor = 'move'
@@ -297,7 +301,7 @@ function WindowShape({
   isSelected: boolean
   scale: number
 }) {
-  const { select, setHovered } = useEditorStore()
+  const { select, setHovered, setIsDragging } = useEditorStore()
   const { updateWindow } = useFloorPlanStore()
 
   // Calculate window position on wall
@@ -349,7 +353,9 @@ function WindowShape({
       rotation={angle * (180 / Math.PI)}
       draggable
       onClick={() => select([window.id])}
+      onDragStart={() => setIsDragging(true)}
       onDragMove={handleDragMove}
+      onDragEnd={() => setIsDragging(false)}
       onMouseEnter={(e) => {
         setHovered(window.id)
         const stage = e.target.getStage()
@@ -394,7 +400,7 @@ function DoorShape({
   isSelected: boolean
   scale: number
 }) {
-  const { select, setHovered } = useEditorStore()
+  const { select, setHovered, setIsDragging } = useEditorStore()
   const { updateDoor } = useFloorPlanStore()
 
   const dx = wall.end.x - wall.start.x
@@ -445,7 +451,9 @@ function DoorShape({
       rotation={angle * (180 / Math.PI)}
       draggable
       onClick={() => select([door.id])}
+      onDragStart={() => setIsDragging(true)}
       onDragMove={handleDragMove}
+      onDragEnd={() => setIsDragging(false)}
       onMouseEnter={(e) => {
         setHovered(door.id)
         const stage = e.target.getStage()
@@ -626,7 +634,7 @@ function FurnitureShape({ id, scale }: { id: string; scale: number }) {
   const furniture = useFloorPlanStore((state) =>
     state.floorPlan.furniture.find((f) => f.id === id)
   )
-  const { select, setHovered } = useEditorStore()
+  const { select, setHovered, setIsDragging } = useEditorStore()
   const { moveFurniture } = useFloorPlanStore()
   const isSelected = useEditorStore((state) => state.selectedIds.includes(id))
   const isHovered = useEditorStore((state) => state.hoveredId === id)
@@ -657,9 +665,11 @@ function FurnitureShape({ id, scale }: { id: string; scale: number }) {
       onClick={() => select([furniture.id])}
       onMouseEnter={() => setHovered(furniture.id)}
       onMouseLeave={() => setHovered(null)}
+      onDragStart={() => setIsDragging(true)}
       onDragMove={(e) => {
         moveFurniture(furniture.id, { x: e.target.x(), y: e.target.y() })
       }}
+      onDragEnd={() => setIsDragging(false)}
     />
   )
 }

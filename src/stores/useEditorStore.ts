@@ -26,6 +26,9 @@ interface EditorState {
   canUndo: boolean
   canRedo: boolean
 
+  // Drag state (to pause history capture during drag)
+  isDragging: boolean
+
   // View actions
   setActiveView: (view: ViewMode) => void
   setZoom2D: (zoom: number) => void
@@ -54,6 +57,9 @@ interface EditorState {
   // History actions
   setCanUndo: (canUndo: boolean) => void
   setCanRedo: (canRedo: boolean) => void
+
+  // Drag actions
+  setIsDragging: (dragging: boolean) => void
 }
 
 const DEFAULT_ZOOM = 1
@@ -81,6 +87,8 @@ export const useEditorStore = create<EditorState>()(
 
     canUndo: false,
     canRedo: false,
+
+    isDragging: false,
 
     // ==================== View Actions ====================
 
@@ -233,6 +241,14 @@ export const useEditorStore = create<EditorState>()(
     setCanRedo: (canRedo) => {
       set((state) => {
         state.canRedo = canRedo
+      })
+    },
+
+    // ==================== Drag Actions ====================
+
+    setIsDragging: (dragging) => {
+      set((state) => {
+        state.isDragging = dragging
       })
     },
   }))
