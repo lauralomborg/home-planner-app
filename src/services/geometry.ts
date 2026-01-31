@@ -372,7 +372,7 @@ export function findParentRoomForPoint(
  */
 export function detectRooms(
   walls: Wall[]
-): Omit<Room, 'id' | 'area' | 'perimeter'>[] {
+): Omit<Room, 'id' | 'area' | 'perimeter' | 'zIndex'>[] {
   if (walls.length < 3) return []
 
   const defaultFloorMaterial: MaterialRef = {
@@ -405,7 +405,7 @@ export function detectRooms(
     adjacency.get(endKey)!.wallIds.set(startKey, wall.id)
   }
 
-  const rooms: Omit<Room, 'id' | 'area' | 'perimeter'>[] = []
+  const rooms: Omit<Room, 'id' | 'area' | 'perimeter' | 'zIndex'>[] = []
   const foundCycles = new Set<string>()
 
   // Find minimal cycles using DFS

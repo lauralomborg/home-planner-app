@@ -38,7 +38,7 @@ interface FloorPlanState {
   removeWall: (id: string) => void
 
   // Room actions
-  addRoom: (room: Omit<Room, 'id' | 'area' | 'perimeter'>) => string
+  addRoom: (room: Omit<Room, 'id' | 'area' | 'perimeter' | 'zIndex'>) => string
   updateRoom: (id: string, updates: Partial<Omit<Room, 'id'>>) => void
   renameRoom: (id: string, name: string) => void
   setRoomType: (id: string, type: RoomType) => void
@@ -54,7 +54,7 @@ interface FloorPlanState {
   updateAllRoomContainment: () => void
 
   // Furniture actions
-  addFurniture: (furniture: Omit<FurnitureInstance, 'id'>) => string
+  addFurniture: (furniture: Omit<FurnitureInstance, 'id' | 'zIndex'>) => string
   updateFurniture: (
     id: string,
     updates: Partial<Omit<FurnitureInstance, 'id'>>
@@ -102,9 +102,20 @@ interface FloorPlanState {
   // Group operations
   createGroup: (memberIds: string[], name?: string) => string | null
   dissolveGroup: (groupId: string) => void
+  toggleGroupLock: (groupId: string) => void
+  renameGroup: (groupId: string, name: string) => void
   getGroupById: (groupId: string) => FurnitureGroup | undefined
   getGroupForItem: (itemId: string) => FurnitureGroup | undefined
   getGroupMembers: (groupId: string) => FurnitureInstance[]
+  getChildrenOfGroup: (groupId: string) => { furniture: FurnitureInstance[]; groups: FurnitureGroup[] }
+  reparentToGroup: (itemId: string, groupId: string | null) => void
+  moveGroup: (groupId: string, delta: Point2D) => void
+
+  // Z-index / ordering operations
+  reorderFurniture: (id: string, newZIndex: number) => void
+  reorderRoom: (id: string, newZIndex: number) => void
+  reorderGroup: (id: string, newZIndex: number) => void
+  getNextZIndex: (type: 'furniture' | 'room' | 'group') => number
 
   // Furniture hierarchy actions
   reparentFurniture: (furnitureId: string, newParentRoomId: string | null) => void
@@ -120,6 +131,8 @@ interface FloorPlanState {
   getWallsForRoom: (roomId: string) => Wall[]
   getFurnitureForRoom: (roomId: string) => FurnitureInstance[]
   getRootFurniture: () => FurnitureInstance[]
+  getGroupsForRoom: (roomId: string) => FurnitureGroup[]
+  getRootGroups: () => FurnitureGroup[]
 }
 
 export const useFloorPlanStore = create<FloorPlanState>()(
@@ -186,11 +199,13 @@ export const useFloorPlanStore = create<FloorPlanState>()(
     addRoom: (room) => {
       const id = crypto.randomUUID()
       set((state) => {
+        const maxZIndex = state.floorPlan.rooms.reduce((max, r) => Math.max(max, r.zIndex ?? 0), -1)
         state.floorPlan.rooms.push({
           ...room,
           id,
           area: 0, // Will be calculated
           perimeter: 0, // Will be calculated
+          zIndex: maxZIndex + 1,
         })
       })
       return id
@@ -256,13 +271,16 @@ export const useFloorPlanStore = create<FloorPlanState>()(
 
       set((state) => {
         // Add detected rooms that don't already exist
-        for (const roomData of detectedRooms) {
+        const maxZIndex = state.floorPlan.rooms.reduce((max, r) => Math.max(max, r.zIndex ?? 0), -1)
+        for (let i = 0; i < detectedRooms.length; i++) {
+          const roomData = detectedRooms[i]
           const id = crypto.randomUUID()
           state.floorPlan.rooms.push({
             ...roomData,
             id,
             area: 0,
             perimeter: 0,
+            zIndex: maxZIndex + 1 + i,
           })
         }
       })
@@ -295,7 +313,8 @@ export const useFloorPlanStore = create<FloorPlanState>()(
           })
         }
 
-        // Add room
+        // Add room with next zIndex
+        const maxZIndex = state.floorPlan.rooms.reduce((max, r) => Math.max(max, r.zIndex ?? 0), -1)
         state.floorPlan.rooms.push({
           id: roomId,
           name: roomName,
@@ -308,6 +327,7 @@ export const useFloorPlanStore = create<FloorPlanState>()(
           perimeter: perimeterM,
           containedFurnitureIds: [],
           containedRoomIds: [],
+          zIndex: maxZIndex + 1,
         })
       })
 
@@ -605,10 +625,13 @@ export const useFloorPlanStore = create<FloorPlanState>()(
       const parentRoom = findParentRoomForPoint(furniture.position, rooms)
 
       set((state) => {
+        // Get next zIndex
+        const maxZIndex = state.floorPlan.furniture.reduce((max, f) => Math.max(max, f.zIndex ?? 0), -1)
         state.floorPlan.furniture.push({
           ...furniture,
           id,
           parentRoomId: parentRoom?.id,
+          zIndex: maxZIndex + 1,
         })
       })
       return id
@@ -682,8 +705,9 @@ export const useFloorPlanStore = create<FloorPlanState>()(
       if (!original) return null
 
       const newId = crypto.randomUUID()
-      set((state) => {
-        state.floorPlan.furniture.push({
+      set((draft) => {
+        const maxZIndex = draft.floorPlan.furniture.reduce((max, f) => Math.max(max, f.zIndex ?? 0), -1)
+        draft.floorPlan.furniture.push({
           ...original,
           id: newId,
           position: {
@@ -691,6 +715,8 @@ export const useFloorPlanStore = create<FloorPlanState>()(
             y: original.position.y + 50,
           },
           locked: false,
+          parentGroupId: undefined, // Don't inherit group membership on duplicate
+          zIndex: maxZIndex + 1,
         })
       })
       return newId
@@ -928,20 +954,25 @@ export const useFloorPlanStore = create<FloorPlanState>()(
       const newIds: string[] = []
 
       set((draft) => {
+        const maxFurnitureZIndex = draft.floorPlan.furniture.reduce((max, f) => Math.max(max, f.zIndex ?? 0), -1)
+
         for (const id of ids) {
           // Try furniture first
           const furniture = state.floorPlan.furniture.find((f) => f.id === id)
           if (furniture) {
             const newId = crypto.randomUUID()
             newIds.push(newId)
+            const cloned = JSON.parse(JSON.stringify(furniture))
             draft.floorPlan.furniture.push({
-              ...JSON.parse(JSON.stringify(furniture)),
+              ...cloned,
               id: newId,
               position: {
                 x: furniture.position.x + 50,
                 y: furniture.position.y + 50,
               },
               locked: false,
+              parentGroupId: undefined, // Don't inherit group membership
+              zIndex: maxFurnitureZIndex + newIds.length,
             })
             continue
           }
@@ -975,7 +1006,7 @@ export const useFloorPlanStore = create<FloorPlanState>()(
       // Filter to only furniture items that exist and aren't already in a group
       const validIds = memberIds.filter((id) => {
         const furniture = state.floorPlan.furniture.find((f) => f.id === id)
-        return furniture && !furniture.groupId
+        return furniture && !furniture.parentGroupId
       })
 
       if (validIds.length < 2) return null
@@ -983,19 +1014,33 @@ export const useFloorPlanStore = create<FloorPlanState>()(
       const groupId = crypto.randomUUID()
       const groupName = name || `Group ${state.floorPlan.groups.length + 1}`
 
+      // Get parentRoomId from first item (if any)
+      const firstItem = state.floorPlan.furniture.find((f) => f.id === validIds[0])
+      const parentRoomId = firstItem?.parentRoomId
+
       set((draft) => {
+        // Calculate zIndex (above highest member)
+        const memberZIndexes = validIds.map((id) => {
+          const f = draft.floorPlan.furniture.find((f) => f.id === id)
+          return f?.zIndex ?? 0
+        })
+        const maxMemberZIndex = Math.max(...memberZIndexes, 0)
+        const maxGroupZIndex = draft.floorPlan.groups.reduce((max, g) => Math.max(max, g.zIndex ?? 0), -1)
+        const groupZIndex = Math.max(maxMemberZIndex, maxGroupZIndex) + 1
+
         // Create the group
         draft.floorPlan.groups.push({
           id: groupId,
           name: groupName,
-          memberIds: validIds,
           locked: false,
+          zIndex: groupZIndex,
+          parentRoomId,
         })
 
-        // Update furniture items with groupId
+        // Update furniture items with parentGroupId
         for (const f of draft.floorPlan.furniture) {
           if (validIds.includes(f.id)) {
-            f.groupId = groupId
+            f.parentGroupId = groupId
           }
         }
       })
@@ -1004,11 +1049,28 @@ export const useFloorPlanStore = create<FloorPlanState>()(
     },
 
     dissolveGroup: (groupId) => {
+      const state = get()
+      const group = state.floorPlan.groups.find((g) => g.id === groupId)
+      if (!group) return
+
       set((draft) => {
-        // Remove groupId from all furniture in this group
+        // Clear parentGroupId on children and set their parentRoomId to group's parentRoomId
         for (const f of draft.floorPlan.furniture) {
-          if (f.groupId === groupId) {
-            delete f.groupId
+          if (f.parentGroupId === groupId) {
+            delete f.parentGroupId
+            if (group.parentRoomId) {
+              f.parentRoomId = group.parentRoomId
+            }
+          }
+        }
+
+        // Handle nested groups - reparent them to the dissolved group's parent
+        for (const g of draft.floorPlan.groups) {
+          if (g.parentGroupId === groupId) {
+            delete g.parentGroupId
+            if (group.parentRoomId) {
+              g.parentRoomId = group.parentRoomId
+            }
           }
         }
 
@@ -1019,23 +1081,156 @@ export const useFloorPlanStore = create<FloorPlanState>()(
       })
     },
 
+    toggleGroupLock: (groupId) => {
+      set((draft) => {
+        const group = draft.floorPlan.groups.find((g) => g.id === groupId)
+        if (group) {
+          group.locked = !group.locked
+        }
+      })
+    },
+
+    renameGroup: (groupId, name) => {
+      set((draft) => {
+        const group = draft.floorPlan.groups.find((g) => g.id === groupId)
+        if (group) {
+          group.name = name
+        }
+      })
+    },
+
     getGroupById: (groupId) =>
       get().floorPlan.groups.find((g) => g.id === groupId),
 
     getGroupForItem: (itemId) => {
       const state = get()
       const furniture = state.floorPlan.furniture.find((f) => f.id === itemId)
-      if (!furniture?.groupId) return undefined
-      return state.floorPlan.groups.find((g) => g.id === furniture.groupId)
+      if (!furniture?.parentGroupId) return undefined
+      return state.floorPlan.groups.find((g) => g.id === furniture.parentGroupId)
     },
 
     getGroupMembers: (groupId) => {
       const state = get()
+      return state.floorPlan.furniture.filter((f) => f.parentGroupId === groupId)
+    },
+
+    getChildrenOfGroup: (groupId) => {
+      const state = get()
+      return {
+        furniture: state.floorPlan.furniture.filter((f) => f.parentGroupId === groupId),
+        groups: state.floorPlan.groups.filter((g) => g.parentGroupId === groupId),
+      }
+    },
+
+    reparentToGroup: (itemId, groupId) => {
+      set((draft) => {
+        // Check if it's furniture
+        const furniture = draft.floorPlan.furniture.find((f) => f.id === itemId)
+        if (furniture) {
+          if (groupId === null) {
+            delete furniture.parentGroupId
+          } else {
+            furniture.parentGroupId = groupId
+            // When adding to a group, the group's room becomes the furniture's room
+            const group = draft.floorPlan.groups.find((g) => g.id === groupId)
+            if (group?.parentRoomId) {
+              furniture.parentRoomId = group.parentRoomId
+            }
+          }
+          return
+        }
+
+        // Check if it's a group (for nesting)
+        const nestedGroup = draft.floorPlan.groups.find((g) => g.id === itemId)
+        if (nestedGroup) {
+          if (groupId === null) {
+            delete nestedGroup.parentGroupId
+          } else {
+            // Prevent circular nesting
+            if (itemId === groupId) return
+            nestedGroup.parentGroupId = groupId
+          }
+        }
+      })
+    },
+
+    moveGroup: (groupId, delta) => {
+      const state = get()
       const group = state.floorPlan.groups.find((g) => g.id === groupId)
-      if (!group) return []
-      return state.floorPlan.furniture.filter((f) =>
-        group.memberIds.includes(f.id)
-      )
+      if (!group || group.locked) return
+
+      set((draft) => {
+        // Move all furniture in this group
+        for (const f of draft.floorPlan.furniture) {
+          if (f.parentGroupId === groupId && !f.locked) {
+            f.position.x += delta.x
+            f.position.y += delta.y
+          }
+        }
+
+        // Recursively move nested groups
+        const moveNestedGroup = (nestedGroupId: string) => {
+          for (const f of draft.floorPlan.furniture) {
+            if (f.parentGroupId === nestedGroupId && !f.locked) {
+              f.position.x += delta.x
+              f.position.y += delta.y
+            }
+          }
+          // Find and move deeper nested groups
+          for (const g of draft.floorPlan.groups) {
+            if (g.parentGroupId === nestedGroupId) {
+              moveNestedGroup(g.id)
+            }
+          }
+        }
+
+        for (const g of draft.floorPlan.groups) {
+          if (g.parentGroupId === groupId) {
+            moveNestedGroup(g.id)
+          }
+        }
+      })
+    },
+
+    // ==================== Z-Index / Ordering Operations ====================
+
+    reorderFurniture: (id, newZIndex) => {
+      set((draft) => {
+        const furniture = draft.floorPlan.furniture.find((f) => f.id === id)
+        if (furniture) {
+          furniture.zIndex = newZIndex
+        }
+      })
+    },
+
+    reorderRoom: (id, newZIndex) => {
+      set((draft) => {
+        const room = draft.floorPlan.rooms.find((r) => r.id === id)
+        if (room) {
+          room.zIndex = newZIndex
+        }
+      })
+    },
+
+    reorderGroup: (id, newZIndex) => {
+      set((draft) => {
+        const group = draft.floorPlan.groups.find((g) => g.id === id)
+        if (group) {
+          group.zIndex = newZIndex
+        }
+      })
+    },
+
+    getNextZIndex: (type) => {
+      const state = get()
+      switch (type) {
+        case 'furniture':
+          return state.floorPlan.furniture.reduce((max, f) => Math.max(max, f.zIndex ?? 0), -1) + 1
+        case 'room':
+          return state.floorPlan.rooms.reduce((max, r) => Math.max(max, r.zIndex ?? 0), -1) + 1
+        case 'group':
+          return state.floorPlan.groups.reduce((max, g) => Math.max(max, g.zIndex ?? 0), -1) + 1
+      }
     },
 
     // ==================== Getters ====================
@@ -1113,18 +1308,36 @@ export const useFloorPlanStore = create<FloorPlanState>()(
     },
 
     getFurnitureForRoom: (roomId) => {
-      return get().floorPlan.furniture.filter((f) => f.parentRoomId === roomId)
+      // Get furniture directly in this room (not in a group)
+      return get().floorPlan.furniture.filter((f) =>
+        f.parentRoomId === roomId && !f.parentGroupId
+      )
     },
 
     getRootFurniture: () => {
-      return get().floorPlan.furniture.filter((f) => !f.parentRoomId)
+      // Get furniture not in any room or group
+      return get().floorPlan.furniture.filter((f) => !f.parentRoomId && !f.parentGroupId)
+    },
+
+    getGroupsForRoom: (roomId) => {
+      // Get groups directly in this room (not nested in another group)
+      return get().floorPlan.groups.filter((g) =>
+        g.parentRoomId === roomId && !g.parentGroupId
+      )
+    },
+
+    getRootGroups: () => {
+      // Get groups not in any room or parent group
+      return get().floorPlan.groups.filter((g) => !g.parentRoomId && !g.parentGroupId)
     },
   })),
     {
       name: 'home-planner-floorplan',
-      version: 2,
+      version: 3,
       migrate: (persistedState: unknown, version: number) => {
-        const state = persistedState as { floorPlan: FloorPlan }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const state = persistedState as { floorPlan: FloorPlan & { furniture: any[]; groups: any[]; rooms: any[] } }
+
         if (version === 1) {
           // Migration from v1 to v2: calculate parentRoomId for furniture
           const { rooms, furniture } = state.floorPlan
@@ -1135,6 +1348,41 @@ export const useFloorPlanStore = create<FloorPlanState>()(
             }
           }
         }
+
+        if (version <= 2) {
+          // Migration from v2 to v3:
+          // 1. Add zIndex to all items based on array position
+          state.floorPlan.rooms.forEach((r, i) => {
+            r.zIndex = r.zIndex ?? i
+          })
+          state.floorPlan.furniture.forEach((f, i) => {
+            f.zIndex = f.zIndex ?? i
+          })
+          state.floorPlan.groups.forEach((g, i) => {
+            g.zIndex = g.zIndex ?? i
+          })
+
+          // 2. Convert groupId → parentGroupId on furniture
+          for (const f of state.floorPlan.furniture) {
+            if (f.groupId) {
+              f.parentGroupId = f.groupId
+              delete f.groupId
+            }
+          }
+
+          // 3. Clean up groups (remove memberIds, add hierarchy fields)
+          for (const g of state.floorPlan.groups) {
+            // Find first member to get parentRoomId
+            const firstMember = state.floorPlan.furniture.find(
+              (f: { parentGroupId?: string }) => f.parentGroupId === g.id
+            )
+            if (firstMember?.parentRoomId) {
+              g.parentRoomId = firstMember.parentRoomId
+            }
+            delete g.memberIds
+          }
+        }
+
         return state
       },
     }

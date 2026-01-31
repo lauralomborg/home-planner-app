@@ -124,6 +124,7 @@ export interface Room {
   containedFurnitureIds: string[] // Furniture inside this room
   containedRoomIds: string[] // Nested rooms inside this room
   parentRoomId?: string // If this room is nested inside another
+  zIndex: number // Render order (higher = on top)
 }
 
 // ============================================
@@ -175,8 +176,9 @@ export interface FurnitureInstance {
   dimensions: Dimensions3D
   partMaterials: Record<string, MaterialRef> // partName -> material
   locked: boolean
-  groupId?: string // Reference to parent group
-  parentRoomId?: string // Explicit parent room for hierarchy
+  parentRoomId?: string // Direct room parent
+  parentGroupId?: string // Group parent (takes precedence over parentRoomId for movement)
+  zIndex: number // Render order (higher = on top)
 }
 
 // ============================================
@@ -186,8 +188,11 @@ export interface FurnitureInstance {
 export interface FurnitureGroup {
   id: string
   name: string
-  memberIds: string[] // IDs of furniture items in this group
   locked: boolean
+  zIndex: number // Render order (higher = on top)
+  parentRoomId?: string // Group can be inside a room
+  parentGroupId?: string // Groups can nest inside other groups
+  // Children are determined by querying items with parentGroupId === this.id
 }
 
 // ============================================
