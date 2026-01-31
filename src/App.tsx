@@ -2,11 +2,12 @@ import { useEffect } from 'react'
 import { Header, Sidebar, PropertyPanel, ViewportContainer } from '@/components/layout'
 import { Canvas2D } from '@/components/editor-2d/Canvas2D'
 import { Scene3D } from '@/components/editor-3d/Scene3D'
-import { useProjectStore } from '@/stores'
+import { useProjectStore, useActiveView } from '@/stores'
 import { useKeyboardShortcuts } from '@/hooks/useUndo'
 
 function App() {
   const { currentProject, createProject, _updateProjectList } = useProjectStore()
+  const activeView = useActiveView()
 
   // Enable keyboard shortcuts
   useKeyboardShortcuts()
@@ -19,16 +20,19 @@ function App() {
     }
   }, [])
 
+  // Hide panels in 3D mode for immersive experience
+  const showPanels = activeView === '2d'
+
   return (
     <div className="h-screen flex flex-col overflow-hidden">
       <Header />
       <div className="flex-1 flex overflow-hidden">
-        <Sidebar />
+        {showPanels && <Sidebar />}
         <ViewportContainer
           canvas2D={<Canvas2D />}
           scene3D={<Scene3D />}
         />
-        <PropertyPanel />
+        {showPanels && <PropertyPanel />}
       </div>
     </div>
   )

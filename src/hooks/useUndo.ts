@@ -191,6 +191,7 @@ export function useKeyboardShortcuts() {
   const selectedIds = useEditorStore((state) => state.selectedIds)
   const clipboard = useEditorStore((state) => state.clipboard)
   const editingGroupId = useEditorStore((state) => state.editingGroupId)
+  const activeView = useEditorStore((state) => state.activeView)
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -343,8 +344,9 @@ export function useKeyboardShortcuts() {
         return
       }
 
-      // Tool shortcuts (no modifier)
-      if (!isMeta && !e.altKey) {
+      // Tool shortcuts (no modifier) - only in 2D mode
+      // In 3D mode, these keys (WASD etc.) are used for walkthrough movement
+      if (!isMeta && !e.altKey && activeView === '2d') {
         switch (e.key.toLowerCase()) {
           case 'v':
             setActiveTool('select')
@@ -410,5 +412,5 @@ export function useKeyboardShortcuts() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [undo, redo, setActiveTool, clearSelection, toggleGrid, toggleSnapToGrid, selectedIds, removeSelected, copyToClipboard, clipboard, duplicateMultiple, moveMultipleFurniture, select, createGroup, dissolveGroup, getGroupForItem, editingGroupId, exitGroupEdit])
+  }, [undo, redo, setActiveTool, clearSelection, toggleGrid, toggleSnapToGrid, selectedIds, removeSelected, copyToClipboard, clipboard, duplicateMultiple, moveMultipleFurniture, select, createGroup, dissolveGroup, getGroupForItem, editingGroupId, exitGroupEdit, activeView])
 }

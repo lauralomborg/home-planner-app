@@ -1,5 +1,5 @@
 import { useCallback } from 'react'
-import { Monitor, Box, Columns2 } from 'lucide-react'
+import { Monitor, Box } from 'lucide-react'
 import { useEditorStore, useActiveView } from '@/stores'
 import type { ViewMode } from '@/models'
 import { cn } from '@/lib/utils'
@@ -30,7 +30,6 @@ export function ViewportContainer({ canvas2D, scene3D }: ViewportContainerProps)
     [
       { mode: '2d', icon: <Monitor className="w-4 h-4" />, label: '2D' },
       { mode: '3d', icon: <Box className="w-4 h-4" />, label: '3D' },
-      { mode: 'split', icon: <Columns2 className="w-4 h-4" />, label: 'Split' },
     ]
 
   return (
@@ -59,21 +58,15 @@ export function ViewportContainer({ canvas2D, scene3D }: ViewportContainerProps)
 
         <span className="text-xs text-muted-foreground/60">
           {activeView === '2d' && 'Floor plan view'}
-          {activeView === '3d' && '3D perspective'}
-          {activeView === 'split' && 'Side by side'}
+          {activeView === '3d' && '3D walkthrough'}
         </span>
       </div>
 
       {/* Viewport Area */}
       <div className="flex-1 flex overflow-hidden">
         {/* 2D View */}
-        {(activeView === '2d' || activeView === 'split') && (
-          <div
-            className={cn(
-              'relative overflow-hidden',
-              activeView === 'split' ? 'w-1/2 border-r border-border/30' : 'flex-1'
-            )}
-          >
+        {activeView === '2d' && (
+          <div className="relative overflow-hidden flex-1">
             <div className="absolute top-3 left-3 z-10">
               <span className="text-[10px] font-medium bg-background/90 backdrop-blur-sm text-muted-foreground px-2.5 py-1 rounded-md border border-border/30 shadow-sm">
                 2D Floor Plan
@@ -84,13 +77,8 @@ export function ViewportContainer({ canvas2D, scene3D }: ViewportContainerProps)
         )}
 
         {/* 3D View */}
-        {(activeView === '3d' || activeView === 'split') && (
-          <div
-            className={cn(
-              'relative overflow-hidden',
-              activeView === 'split' ? 'w-1/2' : 'flex-1'
-            )}
-          >
+        {activeView === '3d' && (
+          <div className="relative overflow-hidden flex-1">
             <div className="absolute top-3 left-3 z-10">
               <span className="text-[10px] font-medium bg-background/90 backdrop-blur-sm text-muted-foreground px-2.5 py-1 rounded-md border border-border/30 shadow-sm">
                 3D View

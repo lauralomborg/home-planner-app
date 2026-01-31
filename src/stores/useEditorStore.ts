@@ -113,7 +113,7 @@ const MAX_ZOOM = 5
 export const useEditorStore = create<EditorState>()(
   immer((set) => ({
     // Initial state
-    activeView: 'split',
+    activeView: '2d',
     zoom2D: DEFAULT_ZOOM,
     pan2D: { x: 0, y: 0 },
     showGrid: true,
@@ -142,7 +142,7 @@ export const useEditorStore = create<EditorState>()(
 
     editingGroupId: null,
 
-    camera3DMode: 'orbit',
+    camera3DMode: 'walkthrough',
     walkthroughPosition: null,
     cameraHeightCommand: null,
 

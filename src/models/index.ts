@@ -310,7 +310,7 @@ export type EditorTool =
   | 'pan'
   | 'erase'
 
-export type ViewMode = '2d' | '3d' | 'split'
+export type ViewMode = '2d' | '3d'
 
 export type Camera3DMode = 'orbit' | 'walkthrough'
 
