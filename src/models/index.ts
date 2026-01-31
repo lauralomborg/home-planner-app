@@ -84,6 +84,7 @@ export interface Wall {
   height: number
   material: MaterialRef
   openings: WallOpening[]
+  ownerRoomId?: string // Which room owns this wall (if any)
 }
 
 // ============================================
@@ -103,15 +104,26 @@ export type RoomType =
   | 'garage'
   | 'custom'
 
+export interface RoomBounds {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
 export interface Room {
   id: string
   name: string
   type: RoomType
+  bounds: RoomBounds // Room's own geometry
   wallIds: string[]
   floorMaterial: MaterialRef
   ceilingMaterial: MaterialRef
   area: number // Calculated in square meters/feet
   perimeter: number // Calculated
+  containedFurnitureIds: string[] // Furniture inside this room
+  containedRoomIds: string[] // Nested rooms inside this room
+  parentRoomId?: string // If this room is nested inside another
 }
 
 // ============================================

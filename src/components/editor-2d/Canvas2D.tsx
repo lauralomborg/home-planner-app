@@ -1,11 +1,10 @@
-import { useRef, useCallback, useEffect, useState, useMemo } from 'react'
+import { useRef, useCallback, useEffect, useState } from 'react'
 import { Stage, Layer, Line, Rect, Circle, Group, Text, Tag, Label, Arc, Transformer } from 'react-konva'
 import type { KonvaEventObject } from 'konva/lib/Node'
 import type Konva from 'konva'
 import { useFloorPlanStore, useEditorStore } from '@/stores'
 import type { Point2D, Wall, Room, WindowInstance, DoorInstance, FurnitureInstance } from '@/models'
 import { DEFAULT_WALL_THICKNESS, DEFAULT_WALL_HEIGHT, DEFAULT_WINDOW_HEIGHT, DEFAULT_WINDOW_ELEVATION, DEFAULT_DOOR_HEIGHT } from '@/models'
-import { getPolygonFromWalls, getPolygonCentroid } from '@/services/geometry'
 import { FURNITURE_CATALOG } from '@/services/catalog'
 
 const GRID_SIZE = 50 // 50cm grid
@@ -531,43 +530,83 @@ function DoorShape({
   )
 }
 
-// Room floor shape
+// Room floor shape - works like furniture with Transformer support
 function RoomShape({
   room,
-  walls,
   isSelected,
   isHovered,
   scale,
+  onRegisterNode,
+  onUnregisterNode,
 }: {
   room: Room
-  walls: Wall[]
   isSelected: boolean
   isHovered: boolean
   scale: number
+  onRegisterNode: (id: string, node: Konva.Rect) => void
+  onUnregisterNode: (id: string) => void
 }) {
-  const { select, addToSelection, toggleSelection, setHovered, activeTool } = useEditorStore()
+  const shapeRef = useRef<Konva.Rect>(null)
+  const { select, addToSelection, toggleSelection, setHovered, activeTool, setIsDragging } = useEditorStore()
+  const { moveRoomTo, resizeRoom } = useFloorPlanStore()
 
-  const polygon = useMemo(() => {
-    return getPolygonFromWalls(walls, room.wallIds)
-  }, [walls, room.wallIds])
+  // Use bounds directly instead of deriving from walls
+  const { x, y, width, height } = room.bounds
+  const centerX = x + width / 2
+  const centerY = y + height / 2
 
-  const centroid = useMemo(() => {
-    return getPolygonCentroid(polygon)
-  }, [polygon])
-
-  if (polygon.length < 3) return null
-
-  const points = polygon.flatMap(p => [p.x, p.y])
   const floorColor = room.floorMaterial.colorOverride || COLORS.roomFloor
   const fillColor = isSelected ? COLORS.roomSelected : floorColor
 
+  // Register/unregister node with transformer when selected
+  useEffect(() => {
+    if (isSelected && shapeRef.current) {
+      onRegisterNode(room.id, shapeRef.current)
+    } else {
+      onUnregisterNode(room.id)
+    }
+    return () => onUnregisterNode(room.id)
+  }, [isSelected, room.id, onRegisterNode, onUnregisterNode])
+
   return (
     <Group>
-      <Line
-        points={points}
-        closed
+      {/* Room floor fill */}
+      <Rect
+        ref={shapeRef}
+        x={x}
+        y={y}
+        width={width}
+        height={height}
         fill={fillColor}
         opacity={isSelected ? 0.5 : isHovered ? 0.4 : 0.3}
+        draggable={activeTool === 'select'}
+        onDragStart={() => setIsDragging(true)}
+        onDragMove={(e) => {
+          // Direct position update like furniture
+          const newPos = { x: e.target.x(), y: e.target.y() }
+          moveRoomTo(room.id, newPos)
+        }}
+        onDragEnd={() => setIsDragging(false)}
+        onTransformEnd={() => {
+          // Get the transformed values
+          const node = shapeRef.current
+          if (!node) return
+
+          const scaleX = node.scaleX()
+          const scaleY = node.scaleY()
+
+          // Reset scale
+          node.scaleX(1)
+          node.scaleY(1)
+
+          // Update room bounds with new position and scaled dimensions
+          resizeRoom(room.id, {
+            x: node.x(),
+            y: node.y(),
+            width: Math.max(50, width * scaleX),
+            height: Math.max(50, height * scaleY),
+          })
+        }}
         onClick={(e) => {
           if (activeTool === 'furniture') {
             return // Let event bubble to stage for furniture placement
@@ -579,8 +618,8 @@ function RoomShape({
       />
       {/* Room label */}
       <Text
-        x={centroid.x}
-        y={centroid.y}
+        x={centerX}
+        y={centerY}
         text={room.name}
         fontSize={14 / scale}
         fontFamily="system-ui, sans-serif"
@@ -593,8 +632,8 @@ function RoomShape({
       />
       {/* Area label */}
       <Text
-        x={centroid.x}
-        y={centroid.y + 16 / scale}
+        x={centerX}
+        y={centerY + 16 / scale}
         text={`${room.area.toFixed(1)} m²`}
         fontSize={11 / scale}
         fontFamily="system-ui, sans-serif"
@@ -1014,7 +1053,7 @@ export function Canvas2D() {
   const furniture = useFloorPlanStore((state) => state.floorPlan.furniture)
   const windows = useFloorPlanStore((state) => state.floorPlan.windows)
   const doors = useFloorPlanStore((state) => state.floorPlan.doors)
-  const { addWall, removeSelected, addWindow, addDoor, detectRooms, addFurniture } = useFloorPlanStore()
+  const { addWall, removeSelected, addWindow, addDoor, createRoomFromBounds, addFurniture } = useFloorPlanStore()
 
   const {
     activeTool,
@@ -1372,51 +1411,24 @@ export function Canvas2D() {
         return
       }
 
-      // Finish room drawing - create 4 walls forming rectangle
+      // Finish room drawing - create room from bounds
       if (roomDrawStart && roomDrawPreview) {
         const minSize = 50 // Minimum room size in cm
-        const width = Math.abs(roomDrawPreview.x - roomDrawStart.x)
-        const height = Math.abs(roomDrawPreview.y - roomDrawStart.y)
+        const roomWidth = Math.abs(roomDrawPreview.x - roomDrawStart.x)
+        const roomHeight = Math.abs(roomDrawPreview.y - roomDrawStart.y)
 
-        if (width >= minSize && height >= minSize) {
-          // Calculate corner points
+        if (roomWidth >= minSize && roomHeight >= minSize) {
+          // Calculate bounds
           const left = Math.min(roomDrawStart.x, roomDrawPreview.x)
-          const right = Math.max(roomDrawStart.x, roomDrawPreview.x)
           const top = Math.min(roomDrawStart.y, roomDrawPreview.y)
-          const bottom = Math.max(roomDrawStart.y, roomDrawPreview.y)
 
-          // Create 4 walls: top, right, bottom, left
-          addWall({
-            start: { x: left, y: top },
-            end: { x: right, y: top },
-            thickness: DEFAULT_WALL_THICKNESS,
-            height: DEFAULT_WALL_HEIGHT,
-            material: { materialId: 'white-paint' },
+          // Create room with bounds (walls are auto-generated)
+          createRoomFromBounds({
+            x: left,
+            y: top,
+            width: roomWidth,
+            height: roomHeight,
           })
-          addWall({
-            start: { x: right, y: top },
-            end: { x: right, y: bottom },
-            thickness: DEFAULT_WALL_THICKNESS,
-            height: DEFAULT_WALL_HEIGHT,
-            material: { materialId: 'white-paint' },
-          })
-          addWall({
-            start: { x: right, y: bottom },
-            end: { x: left, y: bottom },
-            thickness: DEFAULT_WALL_THICKNESS,
-            height: DEFAULT_WALL_HEIGHT,
-            material: { materialId: 'white-paint' },
-          })
-          addWall({
-            start: { x: left, y: bottom },
-            end: { x: left, y: top },
-            thickness: DEFAULT_WALL_THICKNESS,
-            height: DEFAULT_WALL_HEIGHT,
-            material: { materialId: 'white-paint' },
-          })
-
-          // Detect rooms after creating walls
-          detectRooms()
         }
 
         setRoomDrawStart(null)
@@ -1438,7 +1450,7 @@ export function Canvas2D() {
         finishMarquee()
       }
     },
-    [isPanning, roomDrawStart, roomDrawPreview, isMarqueeSelecting, marqueeStart, marqueeEnd, selectedIds, addWall, detectRooms, getItemsInMarquee, select, finishMarquee]
+    [isPanning, roomDrawStart, roomDrawPreview, isMarqueeSelecting, marqueeStart, marqueeEnd, selectedIds, createRoomFromBounds, getItemsInMarquee, select, finishMarquee]
   )
 
   // Handle wheel for zoom
@@ -1634,10 +1646,11 @@ export function Canvas2D() {
             <RoomShape
               key={room.id}
               room={room}
-              walls={walls}
               isSelected={selectedIds.includes(room.id)}
               isHovered={hoveredId === room.id}
               scale={zoom2D}
+              onRegisterNode={handleRegisterNode}
+              onUnregisterNode={handleUnregisterNode}
             />
           ))}
 
@@ -1771,6 +1784,7 @@ export function Canvas2D() {
             />
           ))}
         </Layer>
+
       </Stage>
     </div>
   )

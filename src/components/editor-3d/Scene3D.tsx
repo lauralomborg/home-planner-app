@@ -5,7 +5,6 @@ import * as THREE from 'three'
 import { useFloorPlanStore, useEditorStore, useProjectStore } from '@/stores'
 import { useCamera3DMode, useWalkthroughPosition, useCameraHeightCommand } from '@/stores/useEditorStore'
 import type { Wall, Room, FurnitureInstance } from '@/models'
-import { getPolygonFromWalls } from '@/services/geometry'
 import { Window3D } from './Window3D'
 import { Door3D } from './Door3D'
 import { getFurnitureGenerator } from './furniture'
@@ -160,51 +159,30 @@ function Wall3D({ wall, isSelected }: { wall: Wall; isSelected: boolean }) {
 // Room floor 3D component
 function Room3D({
   room,
-  walls,
   isSelected,
 }: {
   room: Room
-  walls: Wall[]
   isSelected: boolean
 }) {
-  const geometry = useMemo(() => {
-    const polygon = getPolygonFromWalls(walls, room.wallIds)
-    if (polygon.length < 3) return null
+  // Use bounds directly for simpler rectangle geometry
+  const { x, y, width, height } = room.bounds
 
-    // Create shape from polygon (in XY for ShapeGeometry)
-    const shape = new THREE.Shape()
-    shape.moveTo(polygon[0].x / 100, polygon[0].y / 100)
-    for (let i = 1; i < polygon.length; i++) {
-      shape.lineTo(polygon[i].x / 100, polygon[i].y / 100)
-    }
-    shape.closePath()
-
-    const geo = new THREE.ShapeGeometry(shape)
-
-    // Transform vertices from XY to XZ plane manually
-    // This avoids rotation transformation issues
-    const pos = geo.attributes.position
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i)
-      const y = pos.getY(i)
-      pos.setXYZ(i, x, 0, y) // X stays X, Y becomes Z, original Z (0) becomes Y
-    }
-    pos.needsUpdate = true
-    geo.computeVertexNormals()
-
-    return geo
-  }, [room.wallIds, walls])
-
-  if (!geometry) return null
+  // Convert from 2D coordinates (cm) to 3D (meters)
+  // In 3D: X is width, Z is depth (2D Y), Y is up
+  const centerX = (x + width / 2) / 100
+  const centerZ = (y + height / 2) / 100
+  const widthM = width / 100
+  const depthM = height / 100
 
   const floorColor = room.floorMaterial.colorOverride || COLORS.floor
 
   return (
     <mesh
-      geometry={geometry}
-      position={[0, 0.002, 0]}
+      position={[centerX, 0.002, centerZ]}
+      rotation={[-Math.PI / 2, 0, 0]}
       receiveShadow
     >
+      <planeGeometry args={[widthM, depthM]} />
       <meshStandardMaterial
         color={isSelected ? COLORS.furnitureSelected : floorColor}
         roughness={0.85}
@@ -707,7 +685,6 @@ function SceneContent({ onExitWalkthrough }: { onExitWalkthrough: () => void }) 
         <Room3D
           key={room.id}
           room={room}
-          walls={walls}
           isSelected={selectedIds.includes(room.id)}
         />
       ))}

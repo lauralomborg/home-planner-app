@@ -171,7 +171,7 @@ function WallProperties({ wall }: { wall: Wall }) {
 }
 
 function RoomProperties({ room }: { room: Room }) {
-  const { renameRoom, setRoomType, updateRoom } = useFloorPlanStore()
+  const { renameRoom, setRoomType, updateRoom, moveRoom, resizeRoom } = useFloorPlanStore()
 
   return (
     <div className="space-y-6">
@@ -201,6 +201,67 @@ function RoomProperties({ room }: { room: Room }) {
             <option value="custom">Custom</option>
           </select>
         </PropertyRow>
+      </PropertySection>
+
+      <Separator className="bg-border/40" />
+
+      <PropertySection title="Position">
+        <div className="grid grid-cols-2 gap-2">
+          <PropertyRow label="X">
+            <Input
+              type="number"
+              value={Math.round(room.bounds.x)}
+              onChange={(e) => {
+                const newX = Number(e.target.value)
+                const delta = { x: newX - room.bounds.x, y: 0 }
+                moveRoom(room.id, delta)
+              }}
+              className="h-8 text-sm"
+            />
+          </PropertyRow>
+          <PropertyRow label="Y">
+            <Input
+              type="number"
+              value={Math.round(room.bounds.y)}
+              onChange={(e) => {
+                const newY = Number(e.target.value)
+                const delta = { x: 0, y: newY - room.bounds.y }
+                moveRoom(room.id, delta)
+              }}
+              className="h-8 text-sm"
+            />
+          </PropertyRow>
+        </div>
+      </PropertySection>
+
+      <Separator className="bg-border/40" />
+
+      <PropertySection title="Size">
+        <div className="grid grid-cols-2 gap-2">
+          <PropertyRow label="Width">
+            <Input
+              type="number"
+              value={Math.round(room.bounds.width)}
+              onChange={(e) => {
+                const newWidth = Math.max(50, Number(e.target.value))
+                resizeRoom(room.id, { ...room.bounds, width: newWidth })
+              }}
+              className="h-8 text-sm"
+            />
+          </PropertyRow>
+          <PropertyRow label="Height">
+            <Input
+              type="number"
+              value={Math.round(room.bounds.height)}
+              onChange={(e) => {
+                const newHeight = Math.max(50, Number(e.target.value))
+                resizeRoom(room.id, { ...room.bounds, height: newHeight })
+              }}
+              className="h-8 text-sm"
+            />
+          </PropertyRow>
+        </div>
+        <p className="text-xs text-muted-foreground mt-1">Values in cm</p>
       </PropertySection>
 
       <Separator className="bg-border/40" />
