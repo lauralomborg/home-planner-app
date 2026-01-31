@@ -171,7 +171,7 @@ function Room3D({
     const polygon = getPolygonFromWalls(walls, room.wallIds)
     if (polygon.length < 3) return null
 
-    // Create shape from polygon
+    // Create shape from polygon (in XY for ShapeGeometry)
     const shape = new THREE.Shape()
     shape.moveTo(polygon[0].x / 100, polygon[0].y / 100)
     for (let i = 1; i < polygon.length; i++) {
@@ -179,7 +179,20 @@ function Room3D({
     }
     shape.closePath()
 
-    return new THREE.ShapeGeometry(shape)
+    const geo = new THREE.ShapeGeometry(shape)
+
+    // Transform vertices from XY to XZ plane manually
+    // This avoids rotation transformation issues
+    const pos = geo.attributes.position
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i)
+      const y = pos.getY(i)
+      pos.setXYZ(i, x, 0, y) // X stays X, Y becomes Z, original Z (0) becomes Y
+    }
+    pos.needsUpdate = true
+    geo.computeVertexNormals()
+
+    return geo
   }, [room.wallIds, walls])
 
   if (!geometry) return null
@@ -189,7 +202,6 @@ function Room3D({
   return (
     <mesh
       geometry={geometry}
-      rotation={[-Math.PI / 2, 0, 0]}
       position={[0, 0.002, 0]}
       receiveShadow
     >
@@ -341,14 +353,12 @@ function calculateSunPosition(timeOfDay: number, azimuth: number): [number, numb
 const MIN_CAMERA_HEIGHT = 0.5 // Minimum height above ground (meters)
 const MOUSE_SENSITIVITY = 0.003
 const MOVE_SPEED = 0.15
-const ORBIT_SPEED = 0.03
 const ZOOM_SPEED = 0.5
 const MAX_PITCH = Math.PI / 2 - 0.1 // Prevent looking straight up/down
 
 // Hybrid camera: first-person mouse look + WASD movement + Q/E orbit
 function HybridCameraControls() {
   const { camera, gl } = useThree()
-  const orbitTarget = useRef(new THREE.Vector3(0, 0, 0))
   const isDragging = useRef(false)
   const previousMousePosition = useRef({ x: 0, y: 0 })
   const heightCommand = useCameraHeightCommand()
@@ -364,8 +374,8 @@ function HybridCameraControls() {
     backward: false,
     left: false,
     right: false,
-    orbitLeft: false,
-    orbitRight: false,
+    up: false,
+    down: false,
   })
 
   // Initialize camera position and rotation
@@ -476,10 +486,10 @@ function HybridCameraControls() {
           keys.current.right = true
           break
         case 'KeyQ':
-          keys.current.orbitLeft = true
+          keys.current.down = true
           break
         case 'KeyE':
-          keys.current.orbitRight = true
+          keys.current.up = true
           break
       }
     }
@@ -503,10 +513,10 @@ function HybridCameraControls() {
           keys.current.right = false
           break
         case 'KeyQ':
-          keys.current.orbitLeft = false
+          keys.current.down = false
           break
         case 'KeyE':
-          keys.current.orbitRight = false
+          keys.current.up = false
           break
       }
     }
@@ -517,8 +527,8 @@ function HybridCameraControls() {
         backward: false,
         left: false,
         right: false,
-        orbitLeft: false,
-        orbitRight: false,
+        up: false,
+        down: false,
       }
     }
 
@@ -535,26 +545,24 @@ function HybridCameraControls() {
 
   // Apply movement and orbit each frame
   useFrame(() => {
-    const { forward, backward, left, right, orbitLeft, orbitRight } = keys.current
+    const { forward, backward, left, right, up, down } = keys.current
 
     // Handle height command from UI buttons
     if (heightCommand && heightCommand !== lastHeightCommand.current) {
       const heightDelta = heightCommand === 'up' ? 1 : -1
       camera.position.y += heightDelta
-      orbitTarget.current.y += heightDelta
 
       // Enforce ground constraint
       if (camera.position.y < MIN_CAMERA_HEIGHT) {
         camera.position.y = MIN_CAMERA_HEIGHT
-        orbitTarget.current.y = MIN_CAMERA_HEIGHT
       }
       lastHeightCommand.current = heightCommand
     } else if (!heightCommand) {
       lastHeightCommand.current = null
     }
 
-    // WASD Movement (relative to camera facing direction)
-    if (forward || backward || left || right) {
+    // WASD Movement (relative to camera facing direction) + Q/E for up/down
+    if (forward || backward || left || right || up || down) {
       const direction = new THREE.Vector3()
       camera.getWorldDirection(direction)
       direction.y = 0
@@ -569,36 +577,10 @@ function HybridCameraControls() {
       if (backward) delta.add(direction.clone().multiplyScalar(-MOVE_SPEED))
       if (left) delta.add(rightDir.clone().multiplyScalar(-MOVE_SPEED))
       if (right) delta.add(rightDir.clone().multiplyScalar(MOVE_SPEED))
+      if (up) delta.y += MOVE_SPEED
+      if (down) delta.y -= MOVE_SPEED
 
       camera.position.add(delta)
-      orbitTarget.current.add(delta) // Move orbit target with camera
-
-      // Enforce ground constraint
-      if (camera.position.y < MIN_CAMERA_HEIGHT) {
-        camera.position.y = MIN_CAMERA_HEIGHT
-      }
-    }
-
-    // Q/E Orbit around target
-    if (orbitLeft || orbitRight) {
-      const orbitDirection = orbitLeft ? 1 : -1
-      const angle = orbitDirection * ORBIT_SPEED
-
-      // Calculate offset from target
-      const offset = camera.position.clone().sub(orbitTarget.current)
-
-      // Rotate around Y axis
-      const cosAngle = Math.cos(angle)
-      const sinAngle = Math.sin(angle)
-      const newX = offset.x * cosAngle - offset.z * sinAngle
-      const newZ = offset.x * sinAngle + offset.z * cosAngle
-
-      camera.position.x = orbitTarget.current.x + newX
-      camera.position.z = orbitTarget.current.z + newZ
-
-      // Update yaw to keep looking at same relative direction
-      yaw.current += angle
-      updateCameraRotation()
 
       // Enforce ground constraint
       if (camera.position.y < MIN_CAMERA_HEIGHT) {

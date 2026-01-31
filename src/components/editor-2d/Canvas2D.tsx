@@ -208,7 +208,7 @@ function WallShape({
   isHovered: boolean
   scale: number
 }) {
-  const { select, addToSelection, toggleSelection, setHovered, setIsDragging } = useEditorStore()
+  const { select, addToSelection, toggleSelection, setHovered, setIsDragging, activeTool } = useEditorStore()
   const { moveWallEndpoint } = useFloorPlanStore()
 
   const dx = wall.end.x - wall.start.x
@@ -237,7 +237,12 @@ function WallShape({
         strokeWidth={wall.thickness}
         lineCap="round"
         lineJoin="round"
-        onClick={(e) => handleSelectWithModifiers(e, wall.id, select, addToSelection, toggleSelection)}
+        onClick={(e) => {
+          if (activeTool === 'door' || activeTool === 'window') {
+            return // Let event bubble to stage for door/window placement
+          }
+          handleSelectWithModifiers(e, wall.id, select, addToSelection, toggleSelection)
+        }}
         onMouseEnter={() => setHovered(wall.id)}
         onMouseLeave={() => setHovered(null)}
         hitStrokeWidth={Math.max(wall.thickness, 20)}
@@ -540,7 +545,7 @@ function RoomShape({
   isHovered: boolean
   scale: number
 }) {
-  const { select, addToSelection, toggleSelection, setHovered } = useEditorStore()
+  const { select, addToSelection, toggleSelection, setHovered, activeTool } = useEditorStore()
 
   const polygon = useMemo(() => {
     return getPolygonFromWalls(walls, room.wallIds)
@@ -563,7 +568,12 @@ function RoomShape({
         closed
         fill={fillColor}
         opacity={isSelected ? 0.5 : isHovered ? 0.4 : 0.3}
-        onClick={(e) => handleSelectWithModifiers(e, room.id, select, addToSelection, toggleSelection)}
+        onClick={(e) => {
+          if (activeTool === 'furniture') {
+            return // Let event bubble to stage for furniture placement
+          }
+          handleSelectWithModifiers(e, room.id, select, addToSelection, toggleSelection)
+        }}
         onMouseEnter={() => setHovered(room.id)}
         onMouseLeave={() => setHovered(null)}
       />
