@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { immer } from 'zustand/middleware/immer'
-import type { EditorTool, ViewMode, Point2D } from '@/models'
+import type { EditorTool, ViewMode, Point2D, Point3D, Camera3DMode } from '@/models'
 
 interface EditorState {
   // View state
@@ -49,6 +49,11 @@ interface EditorState {
   // Group editing state (when editing inside a group)
   editingGroupId: string | null
 
+  // 3D Camera state
+  camera3DMode: Camera3DMode
+  walkthroughPosition: Point3D | null
+  cameraHeightCommand: 'up' | 'down' | null
+
   // View actions
   setActiveView: (view: ViewMode) => void
   setZoom2D: (zoom: number) => void
@@ -94,6 +99,11 @@ interface EditorState {
   // Group editing actions
   enterGroupEdit: (groupId: string) => void
   exitGroupEdit: () => void
+
+  // 3D Camera actions
+  setCamera3DMode: (mode: Camera3DMode) => void
+  setWalkthroughPosition: (pos: Point3D | null) => void
+  setCameraHeightCommand: (command: 'up' | 'down' | null) => void
 }
 
 const DEFAULT_ZOOM = 1
@@ -131,6 +141,10 @@ export const useEditorStore = create<EditorState>()(
     isDragging: false,
 
     editingGroupId: null,
+
+    camera3DMode: 'orbit',
+    walkthroughPosition: null,
+    cameraHeightCommand: null,
 
     // ==================== View Actions ====================
 
@@ -355,6 +369,26 @@ export const useEditorStore = create<EditorState>()(
         state.selectedIds = []
       })
     },
+
+    // ==================== 3D Camera Actions ====================
+
+    setCamera3DMode: (mode) => {
+      set((state) => {
+        state.camera3DMode = mode
+      })
+    },
+
+    setWalkthroughPosition: (pos) => {
+      set((state) => {
+        state.walkthroughPosition = pos
+      })
+    },
+
+    setCameraHeightCommand: (command) => {
+      set((state) => {
+        state.cameraHeightCommand = command
+      })
+    },
   }))
 )
 
@@ -367,3 +401,6 @@ export const useIsSelected = (id: string) =>
   useEditorStore((state) => state.selectedIds.includes(id))
 export const useIsHovered = (id: string) =>
   useEditorStore((state) => state.hoveredId === id)
+export const useCamera3DMode = () => useEditorStore((state) => state.camera3DMode)
+export const useWalkthroughPosition = () => useEditorStore((state) => state.walkthroughPosition)
+export const useCameraHeightCommand = () => useEditorStore((state) => state.cameraHeightCommand)

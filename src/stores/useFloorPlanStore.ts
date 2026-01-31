@@ -14,6 +14,7 @@ import type {
   RoomType,
   Dimensions3D,
 } from '@/models'
+import { detectRooms as detectRoomsFromWalls } from '@/services/geometry'
 
 interface FloorPlanState {
   floorPlan: FloorPlan
@@ -35,6 +36,7 @@ interface FloorPlanState {
   setRoomType: (id: string, type: RoomType) => void
   setRoomFloorMaterial: (id: string, material: MaterialRef) => void
   removeRoom: (id: string) => void
+  detectRooms: () => void
 
   // Furniture actions
   addFurniture: (furniture: Omit<FurnitureInstance, 'id'>) => string
@@ -210,6 +212,24 @@ export const useFloorPlanStore = create<FloorPlanState>()(
     removeRoom: (id) => {
       set((state) => {
         state.floorPlan.rooms = state.floorPlan.rooms.filter((r) => r.id !== id)
+      })
+    },
+
+    detectRooms: () => {
+      const walls = get().floorPlan.walls
+      const detectedRooms = detectRoomsFromWalls(walls)
+
+      set((state) => {
+        // Add detected rooms that don't already exist
+        for (const roomData of detectedRooms) {
+          const id = crypto.randomUUID()
+          state.floorPlan.rooms.push({
+            ...roomData,
+            id,
+            area: 0,
+            perimeter: 0,
+          })
+        }
       })
     },
 

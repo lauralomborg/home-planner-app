@@ -300,6 +300,8 @@ export type EditorTool =
 
 export type ViewMode = '2d' | '3d' | 'split'
 
+export type Camera3DMode = 'orbit' | 'walkthrough'
+
 export interface EditorState {
   activeView: ViewMode
   activeTool: EditorTool

@@ -1,7 +1,9 @@
+import { useCallback } from 'react'
 import { Monitor, Box, Columns2 } from 'lucide-react'
 import { useEditorStore, useActiveView } from '@/stores'
 import type { ViewMode } from '@/models'
 import { cn } from '@/lib/utils'
+import { CameraControls3D } from '@/components/editor-3d'
 
 interface ViewportContainerProps {
   canvas2D: React.ReactNode
@@ -11,6 +13,18 @@ interface ViewportContainerProps {
 export function ViewportContainer({ canvas2D, scene3D }: ViewportContainerProps) {
   const activeView = useActiveView()
   const setActiveView = useEditorStore((state) => state.setActiveView)
+  const setCameraHeightCommand = useEditorStore((state) => state.setCameraHeightCommand)
+
+  const handleMoveUp = useCallback(() => {
+    setCameraHeightCommand('up')
+    // Clear after a short delay so it acts as a trigger
+    setTimeout(() => setCameraHeightCommand(null), 50)
+  }, [setCameraHeightCommand])
+
+  const handleMoveDown = useCallback(() => {
+    setCameraHeightCommand('down')
+    setTimeout(() => setCameraHeightCommand(null), 50)
+  }, [setCameraHeightCommand])
 
   const viewButtons: { mode: ViewMode; icon: React.ReactNode; label: string }[] =
     [
@@ -83,6 +97,11 @@ export function ViewportContainer({ canvas2D, scene3D }: ViewportContainerProps)
               </span>
             </div>
             {scene3D}
+            {/* Camera mode controls */}
+            <CameraControls3D
+              onMoveUp={handleMoveUp}
+              onMoveDown={handleMoveDown}
+            />
           </div>
         )}
       </div>
