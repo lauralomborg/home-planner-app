@@ -1,28 +1,9 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { useFloorPlanStore, useEditorStore } from '@/stores'
+import { useHistoryStore } from '@/stores/useHistoryStore'
 import type { FloorPlan } from '@/models'
 
-const MAX_HISTORY_SIZE = 50
 const SELECTION_DEBOUNCE_MS = 300
-
-interface HistoryEntry {
-  floorPlan: FloorPlan
-  selectedIds: string[]
-}
-
-interface HistoryState {
-  past: HistoryEntry[]
-  future: HistoryEntry[]
-}
-
-let history: HistoryState = {
-  past: [],
-  future: [],
-}
-
-let lastEntry: HistoryEntry | null = null
-let isUndoRedoing = false
-let selectionDebounceTimer: ReturnType<typeof setTimeout> | null = null
 
 export function useUndo() {
   const floorPlan = useFloorPlanStore((state) => state.floorPlan)
@@ -31,13 +12,27 @@ export function useUndo() {
   const isDragging = useEditorStore((state) => state.isDragging)
   const { setCanUndo, setCanRedo, select } = useEditorStore()
 
+  // History store
+  const {
+    lastEntry,
+    isUndoRedoing,
+    pushEntry,
+    undo: undoHistory,
+    redo: redoHistory,
+    clearHistory: clearHistoryStore,
+    setLastEntry,
+    setSelectionDebounceTimer,
+    clearDebounceTimer,
+    canUndo,
+  } = useHistoryStore()
+
   // Track if this is a selection-only change
   const isSelectionOnlyChange = useRef(false)
 
   // Track changes and add to history
   useEffect(() => {
     if (isUndoRedoing) return
-    if (isDragging) return  // Skip history capture during drag operations
+    if (isDragging) return // Skip history capture during drag operations
 
     const currentFloorPlanStr = JSON.stringify(floorPlan)
     const currentSelectedIdsStr = JSON.stringify(selectedIds)
@@ -52,134 +47,72 @@ export function useUndo() {
 
     // Floor plan changed - record immediately
     if (floorPlanChanged) {
-      // Clear any pending selection debounce
-      if (selectionDebounceTimer) {
-        clearTimeout(selectionDebounceTimer)
-        selectionDebounceTimer = null
-      }
+      clearDebounceTimer()
 
-      if (lastEntry) {
-        history.past = [...history.past.slice(-MAX_HISTORY_SIZE + 1), lastEntry]
-        history.future = []
-      }
-
-      lastEntry = {
+      pushEntry({
         floorPlan: JSON.parse(currentFloorPlanStr) as FloorPlan,
         selectedIds: [...selectedIds],
-      }
+      })
 
-      setCanUndo(history.past.length > 0)
+      setCanUndo(canUndo())
       setCanRedo(false)
       isSelectionOnlyChange.current = false
     }
     // Selection only changed - debounce to avoid history spam
     else if (selectionChanged) {
-      if (selectionDebounceTimer) {
-        clearTimeout(selectionDebounceTimer)
-      }
+      clearDebounceTimer()
 
-      selectionDebounceTimer = setTimeout(() => {
-        if (isUndoRedoing) return
+      const timer = setTimeout(() => {
+        if (useHistoryStore.getState().isUndoRedoing) return
 
-        // Only record if we have a previous entry to compare
-        if (lastEntry) {
-          history.past = [...history.past.slice(-MAX_HISTORY_SIZE + 1), lastEntry]
-          history.future = []
-        }
-
-        lastEntry = {
-          floorPlan: JSON.parse(JSON.stringify(floorPlan)) as FloorPlan,
+        pushEntry({
+          floorPlan: structuredClone(floorPlan),
           selectedIds: [...selectedIds],
-        }
+        })
 
-        setCanUndo(history.past.length > 0)
+        setCanUndo(useHistoryStore.getState().canUndo())
         setCanRedo(false)
         isSelectionOnlyChange.current = true
-        selectionDebounceTimer = null
+        setSelectionDebounceTimer(null)
       }, SELECTION_DEBOUNCE_MS)
+
+      setSelectionDebounceTimer(timer)
     }
-  }, [floorPlan, selectedIds, isDragging, setCanUndo, setCanRedo])
+  }, [floorPlan, selectedIds, isDragging, setCanUndo, setCanRedo, lastEntry, isUndoRedoing, pushEntry, setLastEntry, setSelectionDebounceTimer, clearDebounceTimer, canUndo])
 
   const undo = useCallback(() => {
-    if (history.past.length === 0) return
+    clearDebounceTimer()
 
-    // Clear any pending debounce
-    if (selectionDebounceTimer) {
-      clearTimeout(selectionDebounceTimer)
-      selectionDebounceTimer = null
-    }
+    const previous = undoHistory()
+    if (!previous) return
 
-    isUndoRedoing = true
-
-    // Save current state to future
-    const current: HistoryEntry = {
-      floorPlan: JSON.parse(JSON.stringify(useFloorPlanStore.getState().floorPlan)),
-      selectedIds: [...useEditorStore.getState().selectedIds],
-    }
-    history.future = [current, ...history.future]
-
-    // Restore previous state
-    const previous = history.past[history.past.length - 1]
-    history.past = history.past.slice(0, -1)
-
-    loadFloorPlan(JSON.parse(JSON.stringify(previous.floorPlan)))
+    loadFloorPlan(structuredClone(previous.floorPlan))
     select(previous.selectedIds)
-    lastEntry = JSON.parse(JSON.stringify(previous))
 
     // Update UI state
-    setCanUndo(history.past.length > 0)
-    setCanRedo(history.future.length > 0)
-
-    setTimeout(() => {
-      isUndoRedoing = false
-    }, 0)
-  }, [loadFloorPlan, select, setCanUndo, setCanRedo])
+    setCanUndo(useHistoryStore.getState().canUndo())
+    setCanRedo(useHistoryStore.getState().canRedo())
+  }, [loadFloorPlan, select, setCanUndo, setCanRedo, undoHistory, clearDebounceTimer])
 
   const redo = useCallback(() => {
-    if (history.future.length === 0) return
+    clearDebounceTimer()
 
-    // Clear any pending debounce
-    if (selectionDebounceTimer) {
-      clearTimeout(selectionDebounceTimer)
-      selectionDebounceTimer = null
-    }
+    const next = redoHistory()
+    if (!next) return
 
-    isUndoRedoing = true
-
-    // Save current state to past
-    const current: HistoryEntry = {
-      floorPlan: JSON.parse(JSON.stringify(useFloorPlanStore.getState().floorPlan)),
-      selectedIds: [...useEditorStore.getState().selectedIds],
-    }
-    history.past = [...history.past, current]
-
-    // Restore next state
-    const next = history.future[0]
-    history.future = history.future.slice(1)
-
-    loadFloorPlan(JSON.parse(JSON.stringify(next.floorPlan)))
+    loadFloorPlan(structuredClone(next.floorPlan))
     select(next.selectedIds)
-    lastEntry = JSON.parse(JSON.stringify(next))
 
     // Update UI state
-    setCanUndo(history.past.length > 0)
-    setCanRedo(history.future.length > 0)
-
-    setTimeout(() => {
-      isUndoRedoing = false
-    }, 0)
-  }, [loadFloorPlan, select, setCanUndo, setCanRedo])
+    setCanUndo(useHistoryStore.getState().canUndo())
+    setCanRedo(useHistoryStore.getState().canRedo())
+  }, [loadFloorPlan, select, setCanUndo, setCanRedo, redoHistory, clearDebounceTimer])
 
   const clearHistory = useCallback(() => {
-    if (selectionDebounceTimer) {
-      clearTimeout(selectionDebounceTimer)
-      selectionDebounceTimer = null
-    }
-    history = { past: [], future: [] }
-    lastEntry = null
+    clearHistoryStore()
     setCanUndo(false)
     setCanRedo(false)
-  }, [setCanUndo, setCanRedo])
+  }, [setCanUndo, setCanRedo, clearHistoryStore])
 
   return { undo, redo, clearHistory }
 }

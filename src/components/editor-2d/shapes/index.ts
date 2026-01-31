@@ -1,0 +1,5 @@
+export { WallShape } from './WallShape'
+export { WindowShape } from './WindowShape'
+export { DoorShape } from './DoorShape'
+export { RoomShape } from './RoomShape'
+export { FurnitureShape } from './FurnitureShape'

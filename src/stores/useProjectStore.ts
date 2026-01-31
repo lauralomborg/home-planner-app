@@ -312,17 +312,3 @@ export const useProjectStore = create<ProjectState>()(
     }
   )
 )
-
-// Auto-save hook
-export function useAutoSave(intervalMs: number = 30000) {
-  const { isDirty, autoSaveEnabled, saveProject } = useProjectStore()
-
-  // Set up auto-save interval
-  if (typeof window !== 'undefined') {
-    setInterval(() => {
-      if (isDirty && autoSaveEnabled) {
-        saveProject()
-      }
-    }, intervalMs)
-  }
-}

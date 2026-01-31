@@ -1,3 +1,4 @@
+import { memo, useMemo } from 'react'
 import * as THREE from 'three'
 import type { WindowInstance, Wall } from '@/models'
 
@@ -14,33 +15,60 @@ interface Window3DProps {
   isSelected: boolean
 }
 
-export function Window3D({ window: windowInstance, wall, isSelected }: Window3DProps) {
-  // Calculate wall properties
-  const dx = wall.end.x - wall.start.x
-  const dy = wall.end.y - wall.start.y
-  const wallLength = Math.sqrt(dx * dx + dy * dy)
-  const wallAngle = Math.atan2(dy, dx)
+export const Window3D = memo(function Window3D({ window: windowInstance, wall, isSelected }: Window3DProps) {
+  // Memoize all calculated values
+  const {
+    windowCenterX,
+    windowCenterZ,
+    windowCenterY,
+    wallAngle,
+    windowWidth,
+    windowHeight,
+    frameThickness,
+    frameDepth,
+    hasCenterDivider,
+    hasSlidingDivider,
+  } = useMemo(() => {
+    // Calculate wall properties
+    const dx = wall.end.x - wall.start.x
+    const dy = wall.end.y - wall.start.y
+    const wallLength = Math.sqrt(dx * dx + dy * dy)
+    const wallAngle = Math.atan2(dy, dx)
 
-  // Window dimensions in meters
-  const windowWidth = windowInstance.width / 100
-  const windowHeight = windowInstance.height / 100
-  const frameThickness = 0.05 // 5cm frame
-  const frameDepth = wall.thickness / 100 + 0.02 // Slightly thicker than wall
+    // Window dimensions in meters
+    const windowWidth = windowInstance.width / 100
+    const windowHeight = windowInstance.height / 100
+    const frameThickness = 0.05 // 5cm frame
+    const frameDepth = wall.thickness / 100 + 0.02 // Slightly thicker than wall
 
-  // Position along wall (normalized 0-1) - position is already the center
-  const positionAlongWall = windowInstance.position / wallLength
+    // Position along wall (normalized 0-1) - position is already the center
+    const positionAlongWall = windowInstance.position / wallLength
 
-  // Calculate 3D position
-  const windowCenterX = (wall.start.x + dx * positionAlongWall) / 100
-  const windowCenterZ = (wall.start.y + dy * positionAlongWall) / 100
-  const windowCenterY = (windowInstance.elevationFromFloor + windowInstance.height / 2) / 100
+    // Calculate 3D position
+    const windowCenterX = (wall.start.x + dx * positionAlongWall) / 100
+    const windowCenterZ = (wall.start.y + dy * positionAlongWall) / 100
+    const windowCenterY = (windowInstance.elevationFromFloor + windowInstance.height / 2) / 100
+
+    // Determine if this is a divided window (double type has center divider)
+    const hasCenterDivider = windowInstance.type === 'double'
+    const hasSlidingDivider = windowInstance.type === 'sliding'
+
+    return {
+      windowCenterX,
+      windowCenterZ,
+      windowCenterY,
+      wallAngle,
+      windowWidth,
+      windowHeight,
+      frameThickness,
+      frameDepth,
+      hasCenterDivider,
+      hasSlidingDivider,
+    }
+  }, [windowInstance, wall])
 
   const frameColor = isSelected ? COLORS.frameSelected : windowInstance.frameMaterial.colorOverride || COLORS.frame
   const glassOpacity = windowInstance.glassOpacity
-
-  // Determine if this is a divided window (double type has center divider)
-  const hasCenterDivider = windowInstance.type === 'double'
-  const hasSlidingDivider = windowInstance.type === 'sliding'
 
   return (
     <group
@@ -180,4 +208,4 @@ export function Window3D({ window: windowInstance, wall, isSelected }: Window3DP
       </mesh>
     </group>
   )
-}
+})

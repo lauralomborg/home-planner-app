@@ -1,4 +1,4 @@
-import { useMemo, useCallback } from 'react'
+import { useMemo, useCallback, useEffect, useRef } from 'react'
 import { Vector3, Raycaster, Mesh, BoxGeometry, MeshBasicMaterial } from 'three'
 import type { Wall, DoorInstance } from '@/models'
 
@@ -15,10 +15,31 @@ export function useWalkthroughCollision(
   walls: Wall[],
   doors: DoorInstance[]
 ) {
+  // Reusable objects to avoid per-frame allocations
+  const raycasterRef = useRef<Raycaster>(new Raycaster())
+  const rayOriginRef = useRef<Vector3>(new Vector3())
+  const directionRef = useRef<Vector3>(new Vector3())
+  const tempVec3Ref = useRef<Vector3>(new Vector3())
+
+  // Store previous meshes for cleanup
+  const prevMeshesRef = useRef<Mesh[]>([])
+  const materialRef = useRef<MeshBasicMaterial | null>(null)
+
   // Create collision meshes from walls (excluding door openings)
   const collisionMeshes = useMemo(() => {
+    // Dispose previous meshes
+    prevMeshesRef.current.forEach((mesh) => {
+      mesh.geometry.dispose()
+    })
+    prevMeshesRef.current = []
+
+    // Create or reuse material
+    if (!materialRef.current) {
+      materialRef.current = new MeshBasicMaterial({ visible: false })
+    }
+    const material = materialRef.current
+
     const meshes: Mesh[] = []
-    const material = new MeshBasicMaterial({ visible: false })
 
     walls.forEach((wall) => {
       // Convert from cm to meters
@@ -90,8 +111,25 @@ export function useWalkthroughCollision(
       })
     })
 
+    // Store for cleanup
+    prevMeshesRef.current = meshes
+
     return meshes
   }, [walls, doors])
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      prevMeshesRef.current.forEach((mesh) => {
+        mesh.geometry.dispose()
+      })
+      prevMeshesRef.current = []
+      if (materialRef.current) {
+        materialRef.current.dispose()
+        materialRef.current = null
+      }
+    }
+  }, [])
 
   // Check collision at a given position
   const checkCollision = useCallback(
@@ -100,11 +138,11 @@ export function useWalkthroughCollision(
         return { blocked: false, slideDirection: null }
       }
 
-      const raycaster = new Raycaster()
-      const normalizedDir = direction.clone().normalize()
+      const raycaster = raycasterRef.current
+      const normalizedDir = directionRef.current.copy(direction).normalize()
 
       // Cast rays at body height
-      const rayOrigin = new Vector3(position.x, BODY_HEIGHT * 0.5, position.z)
+      const rayOrigin = rayOriginRef.current.set(position.x, BODY_HEIGHT * 0.5, position.z)
 
       // Check primary direction
       raycaster.set(rayOrigin, normalizedDir)
@@ -122,12 +160,12 @@ export function useWalkthroughCollision(
 
           // Calculate slide direction (perpendicular to normal, in movement direction)
           const dot = normalizedDir.dot(hitNormal)
-          const slideDir = normalizedDir.clone().sub(hitNormal.multiplyScalar(dot))
+          const slideDir = tempVec3Ref.current.copy(normalizedDir).sub(hitNormal.multiplyScalar(dot))
           slideDir.y = 0
 
           if (slideDir.length() > 0.1) {
             slideDir.normalize()
-            return { blocked: true, slideDirection: slideDir }
+            return { blocked: true, slideDirection: slideDir.clone() }
           }
         }
 
@@ -142,7 +180,7 @@ export function useWalkthroughCollision(
   // Constrain movement based on collisions
   const constrainMovement = useCallback(
     (currentPos: Vector3, desiredPos: Vector3): Vector3 => {
-      const direction = new Vector3().subVectors(desiredPos, currentPos)
+      const direction = tempVec3Ref.current.subVectors(desiredPos, currentPos)
 
       if (direction.length() < 0.001) {
         return currentPos.clone()
@@ -164,7 +202,7 @@ export function useWalkthroughCollision(
         // Check if slide position is valid
         const slideResult = checkCollision(
           currentPos,
-          new Vector3().subVectors(slidePos, currentPos)
+          tempVec3Ref.current.subVectors(slidePos, currentPos)
         )
 
         if (!slideResult.blocked) {
@@ -182,12 +220,12 @@ export function useWalkthroughCollision(
   const isValidPosition = useCallback(
     (position: Vector3): boolean => {
       // Cast rays in all directions to check for nearby walls
-      const rayOrigin = new Vector3(position.x, BODY_HEIGHT * 0.5, position.z)
-      const raycaster = new Raycaster()
+      const rayOrigin = rayOriginRef.current.set(position.x, BODY_HEIGHT * 0.5, position.z)
+      const raycaster = raycasterRef.current
 
       for (let i = 0; i < RAY_COUNT; i++) {
         const angle = (i / RAY_COUNT) * Math.PI * 2
-        const direction = new Vector3(Math.cos(angle), 0, Math.sin(angle))
+        const direction = directionRef.current.set(Math.cos(angle), 0, Math.sin(angle))
 
         raycaster.set(rayOrigin, direction)
         raycaster.far = BODY_RADIUS

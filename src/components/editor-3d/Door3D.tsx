@@ -1,3 +1,4 @@
+import { memo, useMemo } from 'react'
 import * as THREE from 'three'
 import type { DoorInstance, Wall } from '@/models'
 
@@ -16,47 +17,90 @@ interface Door3DProps {
   isSelected: boolean
 }
 
-export function Door3D({ door, wall, isSelected }: Door3DProps) {
-  // Calculate wall properties
-  const dx = wall.end.x - wall.start.x
-  const dy = wall.end.y - wall.start.y
-  const wallLength = Math.sqrt(dx * dx + dy * dy)
-  const wallAngle = Math.atan2(dy, dx)
+export const Door3D = memo(function Door3D({ door, wall, isSelected }: Door3DProps) {
+  // Memoize all calculated values
+  const {
+    doorCenterX,
+    doorCenterZ,
+    doorCenterY,
+    wallAngle,
+    doorWidth,
+    doorHeight,
+    frameThickness,
+    frameDepth,
+    panelThickness,
+    handleSize,
+    panelWidth,
+    hingeX,
+    rotationSign,
+    swingDirection,
+    openAngleRad,
+    isDoubleDoor,
+    isSlidingDoor,
+    hingeOnLeft,
+  } = useMemo(() => {
+    // Calculate wall properties
+    const dx = wall.end.x - wall.start.x
+    const dy = wall.end.y - wall.start.y
+    const wallLength = Math.sqrt(dx * dx + dy * dy)
+    const wallAngle = Math.atan2(dy, dx)
 
-  // Door dimensions in meters
-  const doorWidth = door.width / 100
-  const doorHeight = door.height / 100
-  const frameThickness = 0.06 // 6cm frame
-  const frameDepth = wall.thickness / 100 + 0.02
-  const panelThickness = 0.04 // 4cm door panel
-  const handleSize = 0.03
+    // Door dimensions in meters
+    const doorWidth = door.width / 100
+    const doorHeight = door.height / 100
+    const frameThickness = 0.06 // 6cm frame
+    const frameDepth = wall.thickness / 100 + 0.02
+    const panelThickness = 0.04 // 4cm door panel
+    const handleSize = 0.03
 
-  // Position along wall (normalized 0-1) - position is already the center
-  const positionAlongWall = door.position / wallLength
+    // Position along wall (normalized 0-1) - position is already the center
+    const positionAlongWall = door.position / wallLength
 
-  // Calculate 3D position
-  const doorCenterX = (wall.start.x + dx * positionAlongWall) / 100
-  const doorCenterZ = (wall.start.y + dy * positionAlongWall) / 100
-  const doorCenterY = doorHeight / 2 // Doors start at floor level
+    // Calculate 3D position
+    const doorCenterX = (wall.start.x + dx * positionAlongWall) / 100
+    const doorCenterZ = (wall.start.y + dy * positionAlongWall) / 100
+    const doorCenterY = doorHeight / 2 // Doors start at floor level
+
+    // Door open angle in radians
+    const openAngleRad = THREE.MathUtils.degToRad(door.isOpen ? door.openAngle : 0)
+
+    // Determine hinge side based on openDirection
+    const hingeOnLeft = door.openDirection === 'left' || door.openDirection === 'inward'
+    const hingeX = hingeOnLeft ? -doorWidth / 2 + frameThickness : doorWidth / 2 - frameThickness
+    const rotationSign = hingeOnLeft ? 1 : -1
+    const swingDirection = door.openDirection === 'inward' || door.openDirection === 'left' ? 1 : -1
+
+    // Is this a double door?
+    const isDoubleDoor = door.type === 'double' || door.type === 'french'
+    const isSlidingDoor = door.type === 'sliding'
+
+    // Panel width for single vs double doors
+    const panelWidth = isDoubleDoor ? (doorWidth - frameThickness * 2) / 2 - 0.01 : doorWidth - frameThickness * 2
+
+    return {
+      doorCenterX,
+      doorCenterZ,
+      doorCenterY,
+      wallAngle,
+      doorWidth,
+      doorHeight,
+      frameThickness,
+      frameDepth,
+      panelThickness,
+      handleSize,
+      panelWidth,
+      hingeX,
+      rotationSign,
+      swingDirection,
+      openAngleRad,
+      isDoubleDoor,
+      isSlidingDoor,
+      hingeOnLeft,
+    }
+  }, [door, wall])
 
   const frameColor = isSelected ? COLORS.frameSelected : door.material.colorOverride || COLORS.frame
   const panelColor = isSelected ? COLORS.panelSelected : COLORS.panel
-
-  // Door open angle in radians
-  const openAngleRad = THREE.MathUtils.degToRad(door.isOpen ? door.openAngle : 0)
-
-  // Determine hinge side based on openDirection
-  const hingeOnLeft = door.openDirection === 'left' || door.openDirection === 'inward'
-  const hingeX = hingeOnLeft ? -doorWidth / 2 + frameThickness : doorWidth / 2 - frameThickness
-  const rotationSign = hingeOnLeft ? 1 : -1
-  const swingDirection = door.openDirection === 'inward' || door.openDirection === 'left' ? 1 : -1
-
-  // Is this a double door?
-  const isDoubleDoor = door.type === 'double' || door.type === 'french'
-  const isSlidingDoor = door.type === 'sliding'
-
-  // Panel width for single vs double doors
-  const panelWidth = isDoubleDoor ? (doorWidth - frameThickness * 2) / 2 - 0.01 : doorWidth - frameThickness * 2
 
   return (
     <group
@@ -170,4 +214,4 @@ export function Door3D({ door, wall, isSelected }: Door3DProps) {
       </mesh>
     </group>
   )
-}
+})

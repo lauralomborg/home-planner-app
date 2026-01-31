@@ -7,4 +7,4 @@ export {
   useIsSelected,
   useIsHovered,
 } from './useEditorStore'
-export { useProjectStore, useAutoSave } from './useProjectStore'
+export { useProjectStore } from './useProjectStore'
