@@ -1,24 +1,55 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { Header, Sidebar, PropertyPanel, ViewportContainer } from '@/components/layout'
 import { Canvas2D } from '@/components/editor-2d/Canvas2D'
 import { Scene3D } from '@/components/editor-3d/Scene3D'
-import { useProjectStore, useActiveView } from '@/stores'
+import { useProjectStore, useActiveView, useFloorPlanStore } from '@/stores'
 import { useKeyboardShortcuts } from '@/hooks/useUndo'
 
 function App() {
   const { currentProject, createProject, _updateProjectList } = useProjectStore()
   const activeView = useActiveView()
+  const [isHydrated, setIsHydrated] = useState(false)
 
   // Enable keyboard shortcuts
   useKeyboardShortcuts()
 
-  // Initialize project on mount
+  // Wait for store hydration before initializing
   useEffect(() => {
+    // Check if both stores have finished hydrating from localStorage
+    const unsubProject = useProjectStore.persist.onFinishHydration(() => {
+      const unsubFloorPlan = useFloorPlanStore.persist.onFinishHydration(() => {
+        setIsHydrated(true)
+      })
+      // If floor plan store already hydrated, call immediately
+      if (useFloorPlanStore.persist.hasHydrated()) {
+        setIsHydrated(true)
+        unsubFloorPlan()
+      }
+    })
+    // If project store already hydrated, check floor plan store
+    if (useProjectStore.persist.hasHydrated()) {
+      if (useFloorPlanStore.persist.hasHydrated()) {
+        setIsHydrated(true)
+      } else {
+        const unsubFloorPlan = useFloorPlanStore.persist.onFinishHydration(() => {
+          setIsHydrated(true)
+        })
+        return () => unsubFloorPlan()
+      }
+      unsubProject()
+    }
+    return () => unsubProject()
+  }, [])
+
+  // Initialize project only after hydration
+  useEffect(() => {
+    if (!isHydrated) return
+
     _updateProjectList()
     if (!currentProject) {
       createProject('My First Home')
     }
-  }, [])
+  }, [isHydrated])
 
   // Hide panels in 3D mode for immersive experience
   const showPanels = activeView === '2d'

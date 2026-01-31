@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 import { immer } from 'zustand/middleware/immer'
 import type {
   FloorPlan,
@@ -114,17 +115,18 @@ interface FloorPlanState {
 }
 
 export const useFloorPlanStore = create<FloorPlanState>()(
-  immer((set, get) => ({
-    floorPlan: {
-      id: crypto.randomUUID(),
-      walls: [],
-      rooms: [],
-      furniture: [],
-      windows: [],
-      doors: [],
-      lights: [],
-      groups: [],
-    },
+  persist(
+    immer((set, get) => ({
+      floorPlan: {
+        id: crypto.randomUUID(),
+        walls: [],
+        rooms: [],
+        furniture: [],
+        windows: [],
+        doors: [],
+        lights: [],
+        groups: [],
+      },
 
     // ==================== Wall Actions ====================
 
@@ -1001,5 +1003,10 @@ export const useFloorPlanStore = create<FloorPlanState>()(
         .map((id) => state.floorPlan.walls.find((w) => w.id === id))
         .filter((w): w is Wall => w !== undefined)
     },
-  }))
+  })),
+    {
+      name: 'home-planner-floorplan',
+      version: 1,
+    }
+  )
 )
