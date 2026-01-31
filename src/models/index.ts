@@ -84,7 +84,7 @@ export interface Wall {
   height: number
   material: MaterialRef
   openings: WallOpening[]
-  ownerRoomId?: string // Which room owns this wall (if any)
+  ownerRoomId?: string // Room that owns this wall
 }
 
 // ============================================

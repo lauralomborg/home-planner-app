@@ -23,6 +23,9 @@ import {
   getContainedRoomIds,
   findParentRoomForPoint,
   findParentRoomForBounds,
+  pointsAreConnected,
+  getWallsAtPoint,
+  WALL_CONNECTION_TOLERANCE,
 } from '@/services/geometry'
 
 interface FloorPlanState {
@@ -36,6 +39,10 @@ interface FloorPlanState {
     endpoint: 'start' | 'end',
     position: Point2D
   ) => void
+  moveWallJoint: (currentPosition: Point2D, newPosition: Point2D) => void
+  getWallsAtJoint: (
+    position: Point2D
+  ) => Array<{ wallId: string; endpoint: 'start' | 'end' }>
   removeWall: (id: string) => void
 
   // Room actions
@@ -186,6 +193,24 @@ export const useFloorPlanStore = create<FloorPlanState>()(
       })
     },
 
+    moveWallJoint: (currentPosition, newPosition) => {
+      set((state) => {
+        // Move ALL wall endpoints that are at or near currentPosition
+        for (const wall of state.floorPlan.walls) {
+          if (pointsAreConnected(wall.start, currentPosition, WALL_CONNECTION_TOLERANCE)) {
+            wall.start = { ...newPosition }
+          }
+          if (pointsAreConnected(wall.end, currentPosition, WALL_CONNECTION_TOLERANCE)) {
+            wall.end = { ...newPosition }
+          }
+        }
+      })
+    },
+
+    getWallsAtJoint: (position) => {
+      return getWallsAtPoint(position, get().floorPlan.walls, WALL_CONNECTION_TOLERANCE)
+    },
+
     removeWall: (id) => {
       set((state) => {
         state.floorPlan.walls = state.floorPlan.walls.filter((w) => w.id !== id)
@@ -257,46 +282,35 @@ export const useFloorPlanStore = create<FloorPlanState>()(
         const room = state.floorPlan.rooms.find((r) => r.id === id)
         if (!room) return
 
-        // Collect all wall IDs to delete (from room.wallIds + ownerRoomId match)
-        const wallIdsToDelete = new Set(room.wallIds)
-        for (const w of state.floorPlan.walls) {
-          if (w.ownerRoomId === id) {
-            wallIdsToDelete.add(w.id)
-          }
-        }
-
         // Collect all room IDs to delete (this room + all nested rooms recursively)
         const roomIdsToDelete = new Set<string>([id])
 
-        // Recursively collect nested rooms and their walls
+        // Recursively collect nested rooms
         const collectNestedRooms = (parentId: string) => {
           const nestedRooms = state.floorPlan.rooms.filter(
             (r) => r.parentRoomId === parentId
           )
           for (const nested of nestedRooms) {
             roomIdsToDelete.add(nested.id)
-            // Add nested room's walls to delete set
-            for (const wallId of nested.wallIds) {
-              wallIdsToDelete.add(wallId)
-            }
-            // Also add walls by ownerRoomId
-            for (const w of state.floorPlan.walls) {
-              if (w.ownerRoomId === nested.id) {
-                wallIdsToDelete.add(w.id)
-              }
-            }
-            // Recursively handle deeper nesting
             collectNestedRooms(nested.id)
           }
         }
         collectNestedRooms(id)
 
-        // Delete furniture inside this room and all nested rooms
+        // Collect wall IDs to delete (walls owned by rooms being deleted)
+        const wallIdsToDelete = new Set<string>()
+        for (const w of state.floorPlan.walls) {
+          if (w.ownerRoomId && roomIdsToDelete.has(w.ownerRoomId)) {
+            wallIdsToDelete.add(w.id)
+          }
+        }
+
+        // Delete furniture inside rooms being deleted
         state.floorPlan.furniture = state.floorPlan.furniture.filter(
           (f) => !f.parentRoomId || !roomIdsToDelete.has(f.parentRoomId)
         )
 
-        // Delete walls
+        // Delete walls owned by rooms being deleted
         state.floorPlan.walls = state.floorPlan.walls.filter(
           (w) => !wallIdsToDelete.has(w.id)
         )

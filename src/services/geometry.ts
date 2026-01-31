@@ -367,6 +367,177 @@ export function findParentRoomForPoint(
 }
 
 /**
+ * Finds the smallest (innermost) room that fully contains the given bounds.
+ * Used for automatic parent assignment when creating nested rooms.
+ */
+export function findParentRoomForBounds(
+  bounds: RoomBounds,
+  rooms: Room[],
+  excludeId?: string
+): Room | null {
+  // Find all rooms that fully contain these bounds
+  const candidates = rooms.filter(
+    (r) => r.id !== excludeId && isBoundsFullyContained(bounds, r.bounds)
+  )
+
+  if (candidates.length === 0) return null
+
+  // Return the smallest (most specific) containing room
+  return candidates.reduce((smallest, r) =>
+    r.bounds.width * r.bounds.height < smallest.bounds.width * smallest.bounds.height
+      ? r
+      : smallest
+  )
+}
+
+// ==================== Wall Connection/Joint Utilities ====================
+
+/**
+ * Tolerance for considering two wall endpoints as connected (in cm).
+ */
+export const WALL_CONNECTION_TOLERANCE = 5
+
+/**
+ * Checks if two points are within connection tolerance (considered "connected").
+ */
+export function pointsAreConnected(
+  a: Point2D,
+  b: Point2D,
+  tolerance: number = WALL_CONNECTION_TOLERANCE
+): boolean {
+  return Math.abs(a.x - b.x) < tolerance && Math.abs(a.y - b.y) < tolerance
+}
+
+/**
+ * Finds all walls that have an endpoint at or near the given point.
+ * Returns array of {wallId, endpoint, point} objects.
+ */
+export function getWallsAtPoint(
+  point: Point2D,
+  walls: Wall[],
+  tolerance: number = WALL_CONNECTION_TOLERANCE
+): Array<{ wallId: string; endpoint: 'start' | 'end'; point: Point2D }> {
+  const results: Array<{ wallId: string; endpoint: 'start' | 'end'; point: Point2D }> = []
+
+  for (const wall of walls) {
+    if (pointsAreConnected(wall.start, point, tolerance)) {
+      results.push({ wallId: wall.id, endpoint: 'start', point: wall.start })
+    }
+    if (pointsAreConnected(wall.end, point, tolerance)) {
+      results.push({ wallId: wall.id, endpoint: 'end', point: wall.end })
+    }
+  }
+
+  return results
+}
+
+/**
+ * Builds a map of all wall joints (connection points where 2+ walls meet).
+ * Key: normalized point string "x,y"
+ * Value: array of connected wall endpoints
+ */
+export function buildWallJointMap(
+  walls: Wall[],
+  tolerance: number = WALL_CONNECTION_TOLERANCE
+): Map<string, Array<{ wallId: string; endpoint: 'start' | 'end' }>> {
+  const joints = new Map<string, Array<{ wallId: string; endpoint: 'start' | 'end' }>>()
+
+  // Collect all endpoints
+  const endpoints: Array<{ wallId: string; endpoint: 'start' | 'end'; point: Point2D }> = []
+  for (const wall of walls) {
+    endpoints.push({ wallId: wall.id, endpoint: 'start', point: wall.start })
+    endpoints.push({ wallId: wall.id, endpoint: 'end', point: wall.end })
+  }
+
+  // Group endpoints by proximity
+  const visited = new Set<number>()
+
+  for (let i = 0; i < endpoints.length; i++) {
+    if (visited.has(i)) continue
+
+    const group: typeof endpoints = [endpoints[i]]
+    visited.add(i)
+
+    for (let j = i + 1; j < endpoints.length; j++) {
+      if (visited.has(j)) continue
+      if (pointsAreConnected(endpoints[i].point, endpoints[j].point, tolerance)) {
+        group.push(endpoints[j])
+        visited.add(j)
+      }
+    }
+
+    // Only create joint if 2+ walls meet here
+    if (group.length >= 2) {
+      // Use average position as joint key
+      const avgX = group.reduce((sum, e) => sum + e.point.x, 0) / group.length
+      const avgY = group.reduce((sum, e) => sum + e.point.y, 0) / group.length
+      const key = `${Math.round(avgX)},${Math.round(avgY)}`
+
+      joints.set(
+        key,
+        group.map(({ wallId, endpoint }) => ({ wallId, endpoint }))
+      )
+    }
+  }
+
+  return joints
+}
+
+/**
+ * Gets all unique joint positions from walls (where 2+ walls connect).
+ * Returns array of Point2D representing joint centers.
+ */
+export function getWallJointPositions(
+  walls: Wall[],
+  tolerance: number = WALL_CONNECTION_TOLERANCE
+): Point2D[] {
+  const jointMap = buildWallJointMap(walls, tolerance)
+  const positions: Point2D[] = []
+
+  for (const key of jointMap.keys()) {
+    const [x, y] = key.split(',').map(Number)
+    positions.push({ x, y })
+  }
+
+  return positions
+}
+
+/**
+ * Finds the nearest wall endpoint to a given position.
+ * Used for snapping during wall drawing.
+ */
+export function findNearestWallEndpoint(
+  pos: Point2D,
+  walls: Wall[],
+  tolerance: number
+): Point2D | null {
+  let nearest: Point2D | null = null
+  let nearestDist = tolerance
+
+  for (const wall of walls) {
+    const distToStart = Math.sqrt(
+      Math.pow(pos.x - wall.start.x, 2) + Math.pow(pos.y - wall.start.y, 2)
+    )
+    if (distToStart < nearestDist) {
+      nearestDist = distToStart
+      nearest = wall.start
+    }
+
+    const distToEnd = Math.sqrt(
+      Math.pow(pos.x - wall.end.x, 2) + Math.pow(pos.y - wall.end.y, 2)
+    )
+    if (distToEnd < nearestDist) {
+      nearestDist = distToEnd
+      nearest = wall.end
+    }
+  }
+
+  return nearest
+}
+
+// ==================== Room Detection ====================
+
+/**
  * Detects closed rooms formed by connected walls.
  * @deprecated Use createRoomFromBounds instead. This is kept for backward compatibility.
  */
@@ -477,3 +648,173 @@ export function detectRooms(
 
   return rooms
 }
+
+// ==================== Room Snapping ====================
+
+export interface RoomEdge {
+  roomId: string
+  side: 'top' | 'right' | 'bottom' | 'left'
+  start: Point2D
+  end: Point2D
+}
+
+export interface RoomSnapGuide {
+  axis: 'horizontal' | 'vertical'
+  position: number
+  start: number
+  end: number
+}
+
+export interface RoomSnapResult {
+  snappedBounds: RoomBounds
+  snapGuides: RoomSnapGuide[]
+  adjacentEdges: RoomEdge[]
+}
+
+/**
+ * Gets the 4 edges of a room from its bounds.
+ */
+export function getRoomEdges(room: Room): RoomEdge[] {
+  const { x, y, width, height } = room.bounds
+  return [
+    {
+      roomId: room.id,
+      side: 'top',
+      start: { x, y },
+      end: { x: x + width, y },
+    },
+    {
+      roomId: room.id,
+      side: 'right',
+      start: { x: x + width, y },
+      end: { x: x + width, y: y + height },
+    },
+    {
+      roomId: room.id,
+      side: 'bottom',
+      start: { x: x + width, y: y + height },
+      end: { x, y: y + height },
+    },
+    {
+      roomId: room.id,
+      side: 'left',
+      start: { x, y: y + height },
+      end: { x, y },
+    },
+  ]
+}
+
+/**
+ * Calculates room snapping during drawing or moving.
+ * Returns snapped bounds and visual guides.
+ */
+export function calculateRoomSnap(
+  proposedBounds: RoomBounds,
+  existingRooms: Room[],
+  excludeRoomId?: string,
+  snapThreshold: number = 20
+): RoomSnapResult {
+  const snapGuides: RoomSnapGuide[] = []
+  const adjacentEdges: RoomEdge[] = []
+  let snappedBounds = { ...proposedBounds }
+
+  // Get edges of proposed room
+  const proposedEdges = {
+    top: proposedBounds.y,
+    bottom: proposedBounds.y + proposedBounds.height,
+    left: proposedBounds.x,
+    right: proposedBounds.x + proposedBounds.width,
+  }
+
+  // Track snap offsets (only apply one per axis)
+  let snapOffsetX = 0
+  let snapOffsetY = 0
+
+  // Check against each existing room
+  for (const room of existingRooms) {
+    if (room.id === excludeRoomId) continue
+
+    const roomEdges = {
+      top: room.bounds.y,
+      bottom: room.bounds.y + room.bounds.height,
+      left: room.bounds.x,
+      right: room.bounds.x + room.bounds.width,
+    }
+
+    // Check horizontal snaps (top/bottom edges aligning)
+    // Proposed top to existing bottom (room below existing)
+    if (Math.abs(proposedEdges.top - roomEdges.bottom) < snapThreshold && snapOffsetY === 0) {
+      snapOffsetY = roomEdges.bottom - proposedEdges.top
+      const overlapStart = Math.max(proposedBounds.x, room.bounds.x)
+      const overlapEnd = Math.min(proposedBounds.x + proposedBounds.width, room.bounds.x + room.bounds.width)
+      if (overlapEnd > overlapStart) {
+        snapGuides.push({
+          axis: 'horizontal',
+          position: roomEdges.bottom,
+          start: overlapStart - 20,
+          end: overlapEnd + 20,
+        })
+        adjacentEdges.push({ roomId: room.id, side: 'bottom', start: { x: room.bounds.x, y: roomEdges.bottom }, end: { x: room.bounds.x + room.bounds.width, y: roomEdges.bottom } })
+      }
+    }
+    // Proposed bottom to existing top (room above existing)
+    if (Math.abs(proposedEdges.bottom - roomEdges.top) < snapThreshold && snapOffsetY === 0) {
+      snapOffsetY = roomEdges.top - proposedEdges.bottom
+      const overlapStart = Math.max(proposedBounds.x, room.bounds.x)
+      const overlapEnd = Math.min(proposedBounds.x + proposedBounds.width, room.bounds.x + room.bounds.width)
+      if (overlapEnd > overlapStart) {
+        snapGuides.push({
+          axis: 'horizontal',
+          position: roomEdges.top,
+          start: overlapStart - 20,
+          end: overlapEnd + 20,
+        })
+        adjacentEdges.push({ roomId: room.id, side: 'top', start: { x: room.bounds.x, y: roomEdges.top }, end: { x: room.bounds.x + room.bounds.width, y: roomEdges.top } })
+      }
+    }
+
+    // Check vertical snaps (left/right edges aligning)
+    // Proposed left to existing right (room to right of existing)
+    if (Math.abs(proposedEdges.left - roomEdges.right) < snapThreshold && snapOffsetX === 0) {
+      snapOffsetX = roomEdges.right - proposedEdges.left
+      const overlapStart = Math.max(proposedBounds.y, room.bounds.y)
+      const overlapEnd = Math.min(proposedBounds.y + proposedBounds.height, room.bounds.y + room.bounds.height)
+      if (overlapEnd > overlapStart) {
+        snapGuides.push({
+          axis: 'vertical',
+          position: roomEdges.right,
+          start: overlapStart - 20,
+          end: overlapEnd + 20,
+        })
+        adjacentEdges.push({ roomId: room.id, side: 'right', start: { x: roomEdges.right, y: room.bounds.y }, end: { x: roomEdges.right, y: room.bounds.y + room.bounds.height } })
+      }
+    }
+    // Proposed right to existing left (room to left of existing)
+    if (Math.abs(proposedEdges.right - roomEdges.left) < snapThreshold && snapOffsetX === 0) {
+      snapOffsetX = roomEdges.left - proposedEdges.right
+      const overlapStart = Math.max(proposedBounds.y, room.bounds.y)
+      const overlapEnd = Math.min(proposedBounds.y + proposedBounds.height, room.bounds.y + room.bounds.height)
+      if (overlapEnd > overlapStart) {
+        snapGuides.push({
+          axis: 'vertical',
+          position: roomEdges.left,
+          start: overlapStart - 20,
+          end: overlapEnd + 20,
+        })
+        adjacentEdges.push({ roomId: room.id, side: 'left', start: { x: roomEdges.left, y: room.bounds.y }, end: { x: roomEdges.left, y: room.bounds.y + room.bounds.height } })
+      }
+    }
+  }
+
+  // Apply snap offsets
+  if (snapOffsetX !== 0 || snapOffsetY !== 0) {
+    snappedBounds = {
+      ...proposedBounds,
+      x: proposedBounds.x + snapOffsetX,
+      y: proposedBounds.y + snapOffsetY,
+    }
+  }
+
+  return { snappedBounds, snapGuides, adjacentEdges }
+}
+
