@@ -22,6 +22,7 @@ import {
   getContainedFurnitureIds,
   getContainedRoomIds,
   findParentRoomForPoint,
+  findParentRoomForBounds,
 } from '@/services/geometry'
 
 interface FloorPlanState {
@@ -121,6 +122,10 @@ interface FloorPlanState {
   reparentFurniture: (furnitureId: string, newParentRoomId: string | null) => void
   reparentFurnitureByPosition: (furnitureId: string) => void
   finishFurnitureMove: (furnitureIds: string[]) => void
+
+  // Room hierarchy actions
+  finishRoomMove: (roomId: string) => void
+  reparentRoom: (roomId: string, newParentRoomId: string | null) => void
 
   // Getters
   getWallById: (id: string) => Wall | undefined
@@ -249,19 +254,74 @@ export const useFloorPlanStore = create<FloorPlanState>()(
 
     removeRoom: (id) => {
       set((state) => {
-        // Clear parentRoomId on orphaned furniture
-        for (const f of state.floorPlan.furniture) {
-          if (f.parentRoomId === id) {
-            delete f.parentRoomId
+        const room = state.floorPlan.rooms.find((r) => r.id === id)
+        if (!room) return
+
+        // Collect all wall IDs to delete (from room.wallIds + ownerRoomId match)
+        const wallIdsToDelete = new Set(room.wallIds)
+        for (const w of state.floorPlan.walls) {
+          if (w.ownerRoomId === id) {
+            wallIdsToDelete.add(w.id)
           }
         }
-        // Clear parentRoomId on orphaned nested rooms
+
+        // Collect all room IDs to delete (this room + all nested rooms recursively)
+        const roomIdsToDelete = new Set<string>([id])
+
+        // Recursively collect nested rooms and their walls
+        const collectNestedRooms = (parentId: string) => {
+          const nestedRooms = state.floorPlan.rooms.filter(
+            (r) => r.parentRoomId === parentId
+          )
+          for (const nested of nestedRooms) {
+            roomIdsToDelete.add(nested.id)
+            // Add nested room's walls to delete set
+            for (const wallId of nested.wallIds) {
+              wallIdsToDelete.add(wallId)
+            }
+            // Also add walls by ownerRoomId
+            for (const w of state.floorPlan.walls) {
+              if (w.ownerRoomId === nested.id) {
+                wallIdsToDelete.add(w.id)
+              }
+            }
+            // Recursively handle deeper nesting
+            collectNestedRooms(nested.id)
+          }
+        }
+        collectNestedRooms(id)
+
+        // Delete furniture inside this room and all nested rooms
+        state.floorPlan.furniture = state.floorPlan.furniture.filter(
+          (f) => !f.parentRoomId || !roomIdsToDelete.has(f.parentRoomId)
+        )
+
+        // Delete walls
+        state.floorPlan.walls = state.floorPlan.walls.filter(
+          (w) => !wallIdsToDelete.has(w.id)
+        )
+
+        // Delete windows and doors on deleted walls
+        state.floorPlan.windows = state.floorPlan.windows.filter(
+          (w) => !wallIdsToDelete.has(w.wallId)
+        )
+        state.floorPlan.doors = state.floorPlan.doors.filter(
+          (d) => !wallIdsToDelete.has(d.wallId)
+        )
+
+        // Clean up containedRoomIds references in remaining rooms
         for (const r of state.floorPlan.rooms) {
-          if (r.parentRoomId === id) {
-            delete r.parentRoomId
+          if (!roomIdsToDelete.has(r.id)) {
+            r.containedRoomIds = r.containedRoomIds.filter(
+              (cid) => !roomIdsToDelete.has(cid)
+            )
           }
         }
-        state.floorPlan.rooms = state.floorPlan.rooms.filter((r) => r.id !== id)
+
+        // Finally, remove the room and all nested rooms
+        state.floorPlan.rooms = state.floorPlan.rooms.filter(
+          (r) => !roomIdsToDelete.has(r.id)
+        )
       })
     },
 
@@ -302,6 +362,9 @@ export const useFloorPlanStore = create<FloorPlanState>()(
       const wallData = generateWallsFromBounds(bounds, roomId)
       const wallIds: string[] = []
 
+      // Find the smallest room that fully contains this new room
+      const parentRoom = findParentRoomForBounds(bounds, get().floorPlan.rooms)
+
       set((state) => {
         // Add walls
         for (const wall of wallData) {
@@ -328,10 +391,19 @@ export const useFloorPlanStore = create<FloorPlanState>()(
           containedFurnitureIds: [],
           containedRoomIds: [],
           zIndex: maxZIndex + 1,
+          parentRoomId: parentRoom?.id,
         })
+
+        // Update the parent room's containedRoomIds
+        if (parentRoom) {
+          const parent = state.floorPlan.rooms.find((r) => r.id === parentRoom.id)
+          if (parent && !parent.containedRoomIds.includes(roomId)) {
+            parent.containedRoomIds.push(roomId)
+          }
+        }
       })
 
-      // Calculate initial containment
+      // Calculate initial containment (for furniture and nested rooms inside this new room)
       get().updateRoomContainment(roomId)
 
       return roomId
@@ -912,24 +984,34 @@ export const useFloorPlanStore = create<FloorPlanState>()(
     },
 
     removeSelected: (ids) => {
-      set((state) => {
-        const idSet = new Set(ids)
-        state.floorPlan.walls = state.floorPlan.walls.filter(
+      const state = get()
+      const idSet = new Set(ids)
+
+      // Find room IDs in the selection and delete them using removeRoom
+      // (which handles cascading deletion of walls, furniture, windows, doors)
+      const roomIdsToDelete = state.floorPlan.rooms
+        .filter((r) => idSet.has(r.id))
+        .map((r) => r.id)
+
+      for (const roomId of roomIdsToDelete) {
+        get().removeRoom(roomId)
+      }
+
+      // Remove remaining items that weren't part of room cascading deletion
+      set((draft) => {
+        draft.floorPlan.walls = draft.floorPlan.walls.filter(
           (w) => !idSet.has(w.id)
         )
-        state.floorPlan.rooms = state.floorPlan.rooms.filter(
-          (r) => !idSet.has(r.id)
-        )
-        state.floorPlan.furniture = state.floorPlan.furniture.filter(
+        draft.floorPlan.furniture = draft.floorPlan.furniture.filter(
           (f) => !idSet.has(f.id)
         )
-        state.floorPlan.windows = state.floorPlan.windows.filter(
+        draft.floorPlan.windows = draft.floorPlan.windows.filter(
           (w) => !idSet.has(w.id)
         )
-        state.floorPlan.doors = state.floorPlan.doors.filter(
+        draft.floorPlan.doors = draft.floorPlan.doors.filter(
           (d) => !idSet.has(d.id)
         )
-        state.floorPlan.lights = state.floorPlan.lights.filter(
+        draft.floorPlan.lights = draft.floorPlan.lights.filter(
           (l) => !idSet.has(l.id)
         )
       })
@@ -1302,6 +1384,90 @@ export const useFloorPlanStore = create<FloorPlanState>()(
             furniture.parentRoomId = parentRoom.id
           } else {
             delete furniture.parentRoomId
+          }
+        }
+      })
+    },
+
+    // ==================== Room Hierarchy Actions ====================
+
+    finishRoomMove: (roomId) => {
+      const state = get()
+      const room = state.floorPlan.rooms.find((r) => r.id === roomId)
+      if (!room) return
+
+      // Find the new parent room (if any)
+      const newParent = findParentRoomForBounds(
+        room.bounds,
+        state.floorPlan.rooms,
+        roomId
+      )
+
+      set((draft) => {
+        const r = draft.floorPlan.rooms.find((r) => r.id === roomId)
+        if (!r) return
+
+        const oldParentId = r.parentRoomId
+
+        // Update parentRoomId
+        if (newParent) {
+          r.parentRoomId = newParent.id
+        } else {
+          delete r.parentRoomId
+        }
+
+        // Remove from old parent's containedRoomIds
+        if (oldParentId && oldParentId !== newParent?.id) {
+          const oldParent = draft.floorPlan.rooms.find((r) => r.id === oldParentId)
+          if (oldParent) {
+            oldParent.containedRoomIds = oldParent.containedRoomIds.filter(
+              (id) => id !== roomId
+            )
+          }
+        }
+
+        // Add to new parent's containedRoomIds
+        if (newParent && newParent.id !== oldParentId) {
+          const parent = draft.floorPlan.rooms.find((r) => r.id === newParent.id)
+          if (parent && !parent.containedRoomIds.includes(roomId)) {
+            parent.containedRoomIds.push(roomId)
+          }
+        }
+      })
+
+      // Update containment for this room's children
+      get().updateRoomContainment(roomId)
+    },
+
+    reparentRoom: (roomId, newParentRoomId) => {
+      set((draft) => {
+        const room = draft.floorPlan.rooms.find((r) => r.id === roomId)
+        if (!room) return
+
+        const oldParentId = room.parentRoomId
+
+        // Remove from old parent's containedRoomIds
+        if (oldParentId) {
+          const oldParent = draft.floorPlan.rooms.find((r) => r.id === oldParentId)
+          if (oldParent) {
+            oldParent.containedRoomIds = oldParent.containedRoomIds.filter(
+              (id) => id !== roomId
+            )
+          }
+        }
+
+        // Set new parent
+        if (newParentRoomId === null) {
+          delete room.parentRoomId
+        } else {
+          // Prevent circular nesting
+          if (roomId === newParentRoomId) return
+
+          room.parentRoomId = newParentRoomId
+          // Add to new parent's containedRoomIds
+          const newParent = draft.floorPlan.rooms.find((r) => r.id === newParentRoomId)
+          if (newParent && !newParent.containedRoomIds.includes(roomId)) {
+            newParent.containedRoomIds.push(roomId)
           }
         }
       })
