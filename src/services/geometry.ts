@@ -337,6 +337,36 @@ export function getBoundsFromPolygon(polygon: Point2D[]): RoomBounds {
 }
 
 /**
+ * Finds the innermost (smallest) room that contains a given point.
+ * Used for automatic reparenting during drag operations.
+ */
+export function findParentRoomForPoint(
+  point: Point2D,
+  rooms: Room[],
+  excludeRoomId?: string
+): Room | null {
+  let smallestRoom: Room | null = null
+  let smallestArea = Infinity
+
+  for (const room of rooms) {
+    // Skip the excluded room (e.g., when checking a room's own children)
+    if (excludeRoomId && room.id === excludeRoomId) continue
+
+    // Check if the point is inside the room bounds
+    if (isPointInBounds(point, room.bounds)) {
+      const area = room.bounds.width * room.bounds.height
+      // Find the smallest (most nested) room containing the point
+      if (area < smallestArea) {
+        smallestArea = area
+        smallestRoom = room
+      }
+    }
+  }
+
+  return smallestRoom
+}
+
+/**
  * Detects closed rooms formed by connected walls.
  * @deprecated Use createRoomFromBounds instead. This is kept for backward compatibility.
  */

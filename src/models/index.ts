@@ -176,6 +176,7 @@ export interface FurnitureInstance {
   partMaterials: Record<string, MaterialRef> // partName -> material
   locked: boolean
   groupId?: string // Reference to parent group
+  parentRoomId?: string // Explicit parent room for hierarchy
 }
 
 // ============================================

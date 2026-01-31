@@ -29,13 +29,14 @@ export const FurnitureShape = memo(function FurnitureShape({
   const { select, addToSelection, toggleSelection, setHovered, setIsDragging, enterGroupEdit } = useEditorStore()
   const selectedIds = useEditorStore((state) => state.selectedIds)
   const editingGroupId = useEditorStore((state) => state.editingGroupId)
-  const { moveFurniture, moveMultipleFurniture, duplicateMultiple, resizeFurniture, rotateFurniture, getGroupForItem, getGroupMembers } = useFloorPlanStore()
+  const { moveFurniture, moveMultipleFurniture, duplicateMultiple, resizeFurniture, rotateFurniture, getGroupForItem, getGroupMembers, finishFurnitureMove } = useFloorPlanStore()
   const isSelected = useEditorStore((state) => state.selectedIds.includes(id))
   const isHovered = useEditorStore((state) => state.hoveredId === id)
 
   // Track drag start position for multi-select drag
   const dragStartPos = useRef<Point2D | null>(null)
   const didAltDuplicate = useRef(false)
+  const draggedIdsRef = useRef<string[]>([])
 
   // Register/unregister node with transformer when selected
   useEffect(() => {
@@ -137,9 +138,11 @@ export const FurnitureShape = memo(function FurnitureShape({
           if (e.evt.altKey) {
             const newIds = duplicateMultiple(dragIds)
             select(newIds)
+            dragIds = newIds
             didAltDuplicate.current = true
           }
 
+          draggedIdsRef.current = dragIds
           onDragUpdate(true, dragIds)
         }}
         onDragMove={(e) => {
@@ -164,8 +167,13 @@ export const FurnitureShape = memo(function FurnitureShape({
         }}
         onDragEnd={() => {
           setIsDragging(false)
+          // Reparent all dragged furniture based on final position
+          if (draggedIdsRef.current.length > 0) {
+            finishFurnitureMove(draggedIdsRef.current)
+          }
           dragStartPos.current = null
           didAltDuplicate.current = false
+          draggedIdsRef.current = []
           onDragUpdate(false, [])
         }}
         onTransformEnd={() => {

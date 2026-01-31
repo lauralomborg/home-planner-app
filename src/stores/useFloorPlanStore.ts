@@ -21,6 +21,7 @@ import {
   generateWallsFromBounds,
   getContainedFurnitureIds,
   getContainedRoomIds,
+  findParentRoomForPoint,
 } from '@/services/geometry'
 
 interface FloorPlanState {
@@ -105,6 +106,11 @@ interface FloorPlanState {
   getGroupForItem: (itemId: string) => FurnitureGroup | undefined
   getGroupMembers: (groupId: string) => FurnitureInstance[]
 
+  // Furniture hierarchy actions
+  reparentFurniture: (furnitureId: string, newParentRoomId: string | null) => void
+  reparentFurnitureByPosition: (furnitureId: string) => void
+  finishFurnitureMove: (furnitureIds: string[]) => void
+
   // Getters
   getWallById: (id: string) => Wall | undefined
   getRoomById: (id: string) => Room | undefined
@@ -112,6 +118,8 @@ interface FloorPlanState {
   getWindowById: (id: string) => WindowInstance | undefined
   getDoorById: (id: string) => DoorInstance | undefined
   getWallsForRoom: (roomId: string) => Wall[]
+  getFurnitureForRoom: (roomId: string) => FurnitureInstance[]
+  getRootFurniture: () => FurnitureInstance[]
 }
 
 export const useFloorPlanStore = create<FloorPlanState>()(
@@ -226,6 +234,18 @@ export const useFloorPlanStore = create<FloorPlanState>()(
 
     removeRoom: (id) => {
       set((state) => {
+        // Clear parentRoomId on orphaned furniture
+        for (const f of state.floorPlan.furniture) {
+          if (f.parentRoomId === id) {
+            delete f.parentRoomId
+          }
+        }
+        // Clear parentRoomId on orphaned nested rooms
+        for (const r of state.floorPlan.rooms) {
+          if (r.parentRoomId === id) {
+            delete r.parentRoomId
+          }
+        }
         state.floorPlan.rooms = state.floorPlan.rooms.filter((r) => r.id !== id)
       })
     },
@@ -320,16 +340,15 @@ export const useFloorPlanStore = create<FloorPlanState>()(
           }
         }
 
-        // Move contained furniture
-        for (const fId of r.containedFurnitureIds) {
-          const f = state.floorPlan.furniture.find((f) => f.id === fId)
-          if (f && !f.locked) {
+        // Move furniture with explicit parentRoomId (hierarchy-based)
+        for (const f of state.floorPlan.furniture) {
+          if (f.parentRoomId === roomId && !f.locked) {
             f.position.x += delta.x
             f.position.y += delta.y
           }
         }
 
-        // Move nested rooms recursively
+        // Move nested rooms recursively (using parentRoomId)
         const moveNestedRoom = (nestedId: string) => {
           const nested = state.floorPlan.rooms.find((r) => r.id === nestedId)
           if (!nested) return
@@ -349,23 +368,27 @@ export const useFloorPlanStore = create<FloorPlanState>()(
             }
           }
 
-          // Move nested room's contained furniture
-          for (const fId of nested.containedFurnitureIds) {
-            const f = state.floorPlan.furniture.find((f) => f.id === fId)
-            if (f && !f.locked) {
+          // Move nested room's furniture (by parentRoomId)
+          for (const f of state.floorPlan.furniture) {
+            if (f.parentRoomId === nestedId && !f.locked) {
               f.position.x += delta.x
               f.position.y += delta.y
             }
           }
 
-          // Recursively move deeper nested rooms
-          for (const deeperId of nested.containedRoomIds) {
-            moveNestedRoom(deeperId)
+          // Recursively move deeper nested rooms (by parentRoomId)
+          for (const deeperRoom of state.floorPlan.rooms) {
+            if (deeperRoom.parentRoomId === nestedId) {
+              moveNestedRoom(deeperRoom.id)
+            }
           }
         }
 
-        for (const nestedId of r.containedRoomIds) {
-          moveNestedRoom(nestedId)
+        // Find and move all nested rooms (by parentRoomId)
+        for (const nestedRoom of state.floorPlan.rooms) {
+          if (nestedRoom.parentRoomId === roomId) {
+            moveNestedRoom(nestedRoom.id)
+          }
         }
       })
     },
@@ -539,6 +562,31 @@ export const useFloorPlanStore = create<FloorPlanState>()(
             delete r.parentRoomId
           }
         }
+
+        // Sync parentRoomId on furniture for consistency
+        // Only set parentRoomId if this room is the innermost containing room
+        for (const fId of containedFurnitureIds) {
+          const furniture = draft.floorPlan.furniture.find((f) => f.id === fId)
+          if (furniture) {
+            // Check if there's a smaller room that also contains this furniture
+            const innerRoom = findParentRoomForPoint(
+              furniture.position,
+              draft.floorPlan.rooms,
+              roomId
+            )
+            // Only set parentRoomId if this room is the innermost
+            if (!innerRoom || innerRoom.bounds.width * innerRoom.bounds.height >= room.bounds.width * room.bounds.height) {
+              furniture.parentRoomId = roomId
+            }
+          }
+        }
+
+        // Clear parentRoomId for furniture that is no longer contained
+        for (const f of draft.floorPlan.furniture) {
+          if (f.parentRoomId === roomId && !containedFurnitureIds.includes(f.id)) {
+            delete f.parentRoomId
+          }
+        }
       })
     },
 
@@ -553,10 +601,14 @@ export const useFloorPlanStore = create<FloorPlanState>()(
 
     addFurniture: (furniture) => {
       const id = crypto.randomUUID()
+      const rooms = get().floorPlan.rooms
+      const parentRoom = findParentRoomForPoint(furniture.position, rooms)
+
       set((state) => {
         state.floorPlan.furniture.push({
           ...furniture,
           id,
+          parentRoomId: parentRoom?.id,
         })
       })
       return id
@@ -1003,10 +1055,88 @@ export const useFloorPlanStore = create<FloorPlanState>()(
         .map((id) => state.floorPlan.walls.find((w) => w.id === id))
         .filter((w): w is Wall => w !== undefined)
     },
+
+    // ==================== Furniture Hierarchy Actions ====================
+
+    reparentFurniture: (furnitureId, newParentRoomId) => {
+      set((state) => {
+        const furniture = state.floorPlan.furniture.find((f) => f.id === furnitureId)
+        if (furniture) {
+          if (newParentRoomId === null) {
+            delete furniture.parentRoomId
+          } else {
+            furniture.parentRoomId = newParentRoomId
+          }
+        }
+      })
+    },
+
+    reparentFurnitureByPosition: (furnitureId) => {
+      const state = get()
+      const furniture = state.floorPlan.furniture.find((f) => f.id === furnitureId)
+      if (!furniture) return
+
+      const parentRoom = findParentRoomForPoint(
+        furniture.position,
+        state.floorPlan.rooms
+      )
+
+      set((draft) => {
+        const f = draft.floorPlan.furniture.find((f) => f.id === furnitureId)
+        if (f) {
+          if (parentRoom) {
+            f.parentRoomId = parentRoom.id
+          } else {
+            delete f.parentRoomId
+          }
+        }
+      })
+    },
+
+    finishFurnitureMove: (furnitureIds) => {
+      const state = get()
+      const rooms = state.floorPlan.rooms
+
+      set((draft) => {
+        for (const fId of furnitureIds) {
+          const furniture = draft.floorPlan.furniture.find((f) => f.id === fId)
+          if (!furniture) continue
+
+          const parentRoom = findParentRoomForPoint(furniture.position, rooms)
+          if (parentRoom) {
+            furniture.parentRoomId = parentRoom.id
+          } else {
+            delete furniture.parentRoomId
+          }
+        }
+      })
+    },
+
+    getFurnitureForRoom: (roomId) => {
+      return get().floorPlan.furniture.filter((f) => f.parentRoomId === roomId)
+    },
+
+    getRootFurniture: () => {
+      return get().floorPlan.furniture.filter((f) => !f.parentRoomId)
+    },
   })),
     {
       name: 'home-planner-floorplan',
-      version: 1,
+      version: 2,
+      migrate: (persistedState: unknown, version: number) => {
+        const state = persistedState as { floorPlan: FloorPlan }
+        if (version === 1) {
+          // Migration from v1 to v2: calculate parentRoomId for furniture
+          const { rooms, furniture } = state.floorPlan
+          for (const f of furniture) {
+            const parentRoom = findParentRoomForPoint(f.position, rooms)
+            if (parentRoom) {
+              f.parentRoomId = parentRoom.id
+            }
+          }
+        }
+        return state
+      },
     }
   )
 )
