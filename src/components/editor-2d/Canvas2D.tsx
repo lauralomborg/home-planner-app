@@ -1023,6 +1023,9 @@ export function Canvas2D() {
   // Track selected nodes for transformer
   const selectedNodesRef = useRef<Map<string, Konva.Rect>>(new Map())
 
+  // Track when marquee selection just finished to prevent click handler from clearing it
+  const justFinishedMarqueeRef = useRef(false)
+
   // Callbacks for registering/unregistering nodes with transformer
   const handleRegisterNode = useCallback((id: string, node: Konva.Rect) => {
     selectedNodesRef.current.set(id, node)
@@ -1084,7 +1087,7 @@ export function Canvas2D() {
     finishMarquee,
   } = useEditorStore()
 
-  // Get items within a marquee rectangle
+  // Get items within a marquee rectangle (Figma-like: touch to select)
   const getItemsInMarquee = useCallback((start: Point2D, end: Point2D): string[] => {
     const minX = Math.min(start.x, end.x)
     const maxX = Math.max(start.x, end.x)
@@ -1093,28 +1096,76 @@ export function Canvas2D() {
 
     const ids: string[] = []
 
-    // Check furniture
+    // Helper: Check if line segment intersects rectangle
+    const lineIntersectsRect = (
+      x1: number, y1: number, x2: number, y2: number,
+      rectMinX: number, rectMinY: number, rectMaxX: number, rectMaxY: number
+    ): boolean => {
+      // Check if either endpoint is inside the rect
+      if ((x1 >= rectMinX && x1 <= rectMaxX && y1 >= rectMinY && y1 <= rectMaxY) ||
+          (x2 >= rectMinX && x2 <= rectMaxX && y2 >= rectMinY && y2 <= rectMaxY)) {
+        return true
+      }
+
+      // Check if line crosses any of the 4 rectangle edges
+      const linesCross = (ax1: number, ay1: number, ax2: number, ay2: number,
+                          bx1: number, by1: number, bx2: number, by2: number): boolean => {
+        const d1 = (bx2 - bx1) * (ay1 - by1) - (by2 - by1) * (ax1 - bx1)
+        const d2 = (bx2 - bx1) * (ay2 - by1) - (by2 - by1) * (ax2 - bx1)
+        const d3 = (ax2 - ax1) * (by1 - ay1) - (ay2 - ay1) * (bx1 - ax1)
+        const d4 = (ax2 - ax1) * (by2 - ay1) - (ay2 - ay1) * (bx2 - ax1)
+        if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
+            ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) {
+          return true
+        }
+        return false
+      }
+
+      // Check against all 4 edges of rectangle
+      return linesCross(x1, y1, x2, y2, rectMinX, rectMinY, rectMaxX, rectMinY) || // top
+             linesCross(x1, y1, x2, y2, rectMaxX, rectMinY, rectMaxX, rectMaxY) || // right
+             linesCross(x1, y1, x2, y2, rectMinX, rectMaxY, rectMaxX, rectMaxY) || // bottom
+             linesCross(x1, y1, x2, y2, rectMinX, rectMinY, rectMinX, rectMaxY)    // left
+    }
+
+    // Helper: Check if two rectangles intersect
+    const rectsIntersect = (
+      aMinX: number, aMinY: number, aMaxX: number, aMaxY: number,
+      bMinX: number, bMinY: number, bMaxX: number, bMaxY: number
+    ): boolean => {
+      return aMinX < bMaxX && aMaxX > bMinX && aMinY < bMaxY && aMaxY > bMinY
+    }
+
+    // Check rooms - AABB intersection with room bounds
+    for (const r of rooms) {
+      const roomMinX = r.bounds.x
+      const roomMinY = r.bounds.y
+      const roomMaxX = r.bounds.x + r.bounds.width
+      const roomMaxY = r.bounds.y + r.bounds.height
+      if (rectsIntersect(minX, minY, maxX, maxY, roomMinX, roomMinY, roomMaxX, roomMaxY)) {
+        ids.push(r.id)
+      }
+    }
+
+    // Check furniture - AABB intersection
     for (const f of furniture) {
       const fx = f.position.x
       const fy = f.position.y
       const hw = f.dimensions.width / 2
       const hd = f.dimensions.depth / 2
-      // Simple AABB check (doesn't account for rotation, but good enough)
       if (fx - hw < maxX && fx + hw > minX && fy - hd < maxY && fy + hd > minY) {
         ids.push(f.id)
       }
     }
 
-    // Check walls (by midpoint)
+    // Check walls - line segment intersection with marquee rectangle
     for (const w of walls) {
-      const midX = (w.start.x + w.end.x) / 2
-      const midY = (w.start.y + w.end.y) / 2
-      if (midX >= minX && midX <= maxX && midY >= minY && midY <= maxY) {
+      if (lineIntersectsRect(w.start.x, w.start.y, w.end.x, w.end.y, minX, minY, maxX, maxY)) {
         ids.push(w.id)
       }
     }
 
-    // Check windows (by position along wall)
+    // Check windows - use bounding box around window position
     for (const win of windows) {
       const wall = walls.find((w) => w.id === win.wallId)
       if (wall) {
@@ -1124,13 +1175,16 @@ export function Canvas2D() {
         const t = win.position / length
         const wx = wall.start.x + dx * t
         const wy = wall.start.y + dy * t
-        if (wx >= minX && wx <= maxX && wy >= minY && wy <= maxY) {
+        // Create bounding box for window
+        const halfWidth = win.width / 2
+        if (rectsIntersect(minX, minY, maxX, maxY,
+                           wx - halfWidth, wy - halfWidth, wx + halfWidth, wy + halfWidth)) {
           ids.push(win.id)
         }
       }
     }
 
-    // Check doors (by position along wall)
+    // Check doors - use bounding box around door position
     for (const door of doors) {
       const wall = walls.find((w) => w.id === door.wallId)
       if (wall) {
@@ -1140,14 +1194,17 @@ export function Canvas2D() {
         const t = door.position / length
         const doorX = wall.start.x + dx * t
         const doorY = wall.start.y + dy * t
-        if (doorX >= minX && doorX <= maxX && doorY >= minY && doorY <= maxY) {
+        // Create bounding box for door
+        const halfWidth = door.width / 2
+        if (rectsIntersect(minX, minY, maxX, maxY,
+                           doorX - halfWidth, doorY - halfWidth, doorX + halfWidth, doorY + halfWidth)) {
           ids.push(door.id)
         }
       }
     }
 
     return ids
-  }, [furniture, walls, windows, doors])
+  }, [rooms, furniture, walls, windows, doors])
 
   // Find wall at position for window/door placement
   const findWallAtPosition = useCallback((pos: Point2D): { wall: Wall; position: number } | null => {
@@ -1258,8 +1315,13 @@ export function Canvas2D() {
         }
       } else if (activeTool === 'select') {
         // Only clear selection when clicking on empty stage without modifier keys
+        // Skip if we just finished a marquee selection (click fires after mouseup)
         if (e.target === stage && !e.evt.shiftKey && !e.evt.metaKey && !e.evt.ctrlKey) {
-          clearSelection()
+          if (justFinishedMarqueeRef.current) {
+            justFinishedMarqueeRef.current = false
+          } else {
+            clearSelection()
+          }
         }
       }
     },
@@ -1446,6 +1508,8 @@ export function Canvas2D() {
           } else {
             select(itemsInMarquee)
           }
+          // Mark that we just finished a marquee selection, so click handler won't clear it
+          justFinishedMarqueeRef.current = true
         }
         finishMarquee()
       }
