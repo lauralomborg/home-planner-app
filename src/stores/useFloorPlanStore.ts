@@ -4,6 +4,7 @@ import type {
   FloorPlan,
   Wall,
   Room,
+  RoomBounds,
   FurnitureInstance,
   FurnitureGroup,
   WindowInstance,
@@ -14,7 +15,12 @@ import type {
   RoomType,
   Dimensions3D,
 } from '@/models'
-import { detectRooms as detectRoomsFromWalls } from '@/services/geometry'
+import {
+  detectRooms as detectRoomsFromWalls,
+  generateWallsFromBounds,
+  getContainedFurnitureIds,
+  getContainedRoomIds,
+} from '@/services/geometry'
 
 interface FloorPlanState {
   floorPlan: FloorPlan
@@ -37,6 +43,13 @@ interface FloorPlanState {
   setRoomFloorMaterial: (id: string, material: MaterialRef) => void
   removeRoom: (id: string) => void
   detectRooms: () => void
+  // New room frame actions
+  createRoomFromBounds: (bounds: RoomBounds, name?: string) => string
+  moveRoom: (roomId: string, delta: Point2D) => void
+  moveRoomTo: (roomId: string, position: Point2D) => void
+  resizeRoom: (roomId: string, newBounds: RoomBounds) => void
+  updateRoomContainment: (roomId: string) => void
+  updateAllRoomContainment: () => void
 
   // Furniture actions
   addFurniture: (furniture: Omit<FurnitureInstance, 'id'>) => string
@@ -231,6 +244,307 @@ export const useFloorPlanStore = create<FloorPlanState>()(
           })
         }
       })
+    },
+
+    createRoomFromBounds: (bounds, name) => {
+      const roomId = crypto.randomUUID()
+      const roomName = name || `Room ${get().floorPlan.rooms.length + 1}`
+
+      // Calculate area in m² (bounds are in cm)
+      const areaCm2 = bounds.width * bounds.height
+      const areaM2 = areaCm2 / 10000
+
+      // Calculate perimeter in m
+      const perimeterCm = 2 * (bounds.width + bounds.height)
+      const perimeterM = perimeterCm / 100
+
+      // Generate walls from bounds
+      const wallData = generateWallsFromBounds(bounds, roomId)
+      const wallIds: string[] = []
+
+      set((state) => {
+        // Add walls
+        for (const wall of wallData) {
+          const wallId = crypto.randomUUID()
+          wallIds.push(wallId)
+          state.floorPlan.walls.push({
+            ...wall,
+            id: wallId,
+          })
+        }
+
+        // Add room
+        state.floorPlan.rooms.push({
+          id: roomId,
+          name: roomName,
+          type: 'custom',
+          bounds,
+          wallIds,
+          floorMaterial: { materialId: 'wood-light', colorOverride: '#E8DCC4' },
+          ceilingMaterial: { materialId: 'white-paint' },
+          area: areaM2,
+          perimeter: perimeterM,
+          containedFurnitureIds: [],
+          containedRoomIds: [],
+        })
+      })
+
+      // Calculate initial containment
+      get().updateRoomContainment(roomId)
+
+      return roomId
+    },
+
+    moveRoom: (roomId, delta) => {
+      const room = get().getRoomById(roomId)
+      if (!room) return
+
+      set((state) => {
+        const r = state.floorPlan.rooms.find((r) => r.id === roomId)
+        if (!r) return
+
+        // Move room bounds
+        r.bounds.x += delta.x
+        r.bounds.y += delta.y
+
+        // Move owned walls
+        for (const wallId of r.wallIds) {
+          const wall = state.floorPlan.walls.find((w) => w.id === wallId)
+          if (wall) {
+            wall.start.x += delta.x
+            wall.start.y += delta.y
+            wall.end.x += delta.x
+            wall.end.y += delta.y
+          }
+        }
+
+        // Move contained furniture
+        for (const fId of r.containedFurnitureIds) {
+          const f = state.floorPlan.furniture.find((f) => f.id === fId)
+          if (f && !f.locked) {
+            f.position.x += delta.x
+            f.position.y += delta.y
+          }
+        }
+
+        // Move nested rooms recursively
+        const moveNestedRoom = (nestedId: string) => {
+          const nested = state.floorPlan.rooms.find((r) => r.id === nestedId)
+          if (!nested) return
+
+          // Move nested room bounds
+          nested.bounds.x += delta.x
+          nested.bounds.y += delta.y
+
+          // Move nested room's walls
+          for (const wallId of nested.wallIds) {
+            const wall = state.floorPlan.walls.find((w) => w.id === wallId)
+            if (wall) {
+              wall.start.x += delta.x
+              wall.start.y += delta.y
+              wall.end.x += delta.x
+              wall.end.y += delta.y
+            }
+          }
+
+          // Move nested room's contained furniture
+          for (const fId of nested.containedFurnitureIds) {
+            const f = state.floorPlan.furniture.find((f) => f.id === fId)
+            if (f && !f.locked) {
+              f.position.x += delta.x
+              f.position.y += delta.y
+            }
+          }
+
+          // Recursively move deeper nested rooms
+          for (const deeperId of nested.containedRoomIds) {
+            moveNestedRoom(deeperId)
+          }
+        }
+
+        for (const nestedId of r.containedRoomIds) {
+          moveNestedRoom(nestedId)
+        }
+      })
+    },
+
+    moveRoomTo: (roomId, position) => {
+      const room = get().getRoomById(roomId)
+      if (!room) return
+
+      // Calculate delta from current position to target position
+      const delta = {
+        x: position.x - room.bounds.x,
+        y: position.y - room.bounds.y,
+      }
+
+      // Use existing moveRoom with the calculated delta
+      get().moveRoom(roomId, delta)
+    },
+
+    resizeRoom: (roomId, newBounds) => {
+      const room = get().getRoomById(roomId)
+      if (!room) return
+
+      set((state) => {
+        const r = state.floorPlan.rooms.find((r) => r.id === roomId)
+        if (!r) return
+
+        // Update bounds
+        r.bounds = { ...newBounds }
+
+        // Recalculate area and perimeter
+        r.area = (newBounds.width * newBounds.height) / 10000
+        r.perimeter = (2 * (newBounds.width + newBounds.height)) / 100
+
+        // Get old walls and their IDs before removing them
+        const oldWalls = state.floorPlan.walls.filter(
+          (w) => w.ownerRoomId === roomId
+        )
+        const oldWallIds = oldWalls.map((w) => w.id)
+
+        // Save windows/doors attached to old walls
+        const affectedWindows = state.floorPlan.windows.filter((w) =>
+          oldWallIds.includes(w.wallId)
+        )
+        const affectedDoors = state.floorPlan.doors.filter((d) =>
+          oldWallIds.includes(d.wallId)
+        )
+
+        // Remove old walls owned by this room
+        state.floorPlan.walls = state.floorPlan.walls.filter(
+          (w) => w.ownerRoomId !== roomId
+        )
+
+        // Generate new walls from new bounds
+        const wallData = generateWallsFromBounds(newBounds, roomId)
+        const newWallIds: string[] = []
+
+        for (const wall of wallData) {
+          const wallId = crypto.randomUUID()
+          newWallIds.push(wallId)
+          state.floorPlan.walls.push({
+            ...wall,
+            id: wallId,
+          })
+        }
+
+        r.wallIds = newWallIds
+
+        // Map old walls to new walls by position (top, right, bottom, left)
+        // generateWallsFromBounds creates walls in order: top, right, bottom, left
+        const wallMapping = new Map<string, string>()
+        for (let i = 0; i < oldWallIds.length && i < newWallIds.length; i++) {
+          wallMapping.set(oldWallIds[i], newWallIds[i])
+        }
+
+        // Reassign windows to new walls
+        for (const window of affectedWindows) {
+          const newWallId = wallMapping.get(window.wallId)
+          if (newWallId) {
+            window.wallId = newWallId
+            // Find new wall and clamp position if needed
+            const newWall = state.floorPlan.walls.find((w) => w.id === newWallId)
+            if (newWall) {
+              const dx = newWall.end.x - newWall.start.x
+              const dy = newWall.end.y - newWall.start.y
+              const wallLength = Math.sqrt(dx * dx + dy * dy)
+              // Clamp position to stay within wall bounds
+              const minPos = window.width / 2
+              const maxPos = wallLength - window.width / 2
+              window.position = Math.max(minPos, Math.min(maxPos, window.position))
+              // Add opening to the new wall
+              newWall.openings.push({
+                id: crypto.randomUUID(),
+                type: 'window',
+                position: window.position,
+                width: window.width,
+                height: window.height,
+                elevationFromFloor: window.elevationFromFloor,
+                referenceId: window.id,
+              })
+            }
+          }
+        }
+
+        // Reassign doors to new walls
+        for (const door of affectedDoors) {
+          const newWallId = wallMapping.get(door.wallId)
+          if (newWallId) {
+            door.wallId = newWallId
+            // Find new wall and clamp position if needed
+            const newWall = state.floorPlan.walls.find((w) => w.id === newWallId)
+            if (newWall) {
+              const dx = newWall.end.x - newWall.start.x
+              const dy = newWall.end.y - newWall.start.y
+              const wallLength = Math.sqrt(dx * dx + dy * dy)
+              // Clamp position to stay within wall bounds
+              const minPos = door.width / 2
+              const maxPos = wallLength - door.width / 2
+              door.position = Math.max(minPos, Math.min(maxPos, door.position))
+              // Add opening to the new wall
+              newWall.openings.push({
+                id: crypto.randomUUID(),
+                type: 'door',
+                position: door.position,
+                width: door.width,
+                height: door.height,
+                elevationFromFloor: 0,
+                referenceId: door.id,
+              })
+            }
+          }
+        }
+      })
+
+      // Update containment after resize
+      get().updateRoomContainment(roomId)
+    },
+
+    updateRoomContainment: (roomId) => {
+      const state = get()
+      const room = state.floorPlan.rooms.find((r) => r.id === roomId)
+      if (!room) return
+
+      const containedFurnitureIds = getContainedFurnitureIds(
+        room.bounds,
+        state.floorPlan.furniture
+      )
+      const containedRoomIds = getContainedRoomIds(
+        room.bounds,
+        state.floorPlan.rooms,
+        roomId
+      )
+
+      set((draft) => {
+        const r = draft.floorPlan.rooms.find((r) => r.id === roomId)
+        if (r) {
+          r.containedFurnitureIds = containedFurnitureIds
+          r.containedRoomIds = containedRoomIds
+        }
+
+        // Update parentRoomId for contained rooms
+        for (const containedId of containedRoomIds) {
+          const contained = draft.floorPlan.rooms.find((r) => r.id === containedId)
+          if (contained) {
+            contained.parentRoomId = roomId
+          }
+        }
+
+        // Clear parentRoomId for rooms that are no longer contained
+        for (const r of draft.floorPlan.rooms) {
+          if (r.parentRoomId === roomId && !containedRoomIds.includes(r.id)) {
+            delete r.parentRoomId
+          }
+        }
+      })
+    },
+
+    updateAllRoomContainment: () => {
+      const rooms = get().floorPlan.rooms
+      for (const room of rooms) {
+        get().updateRoomContainment(room.id)
+      }
     },
 
     // ==================== Furniture Actions ====================
