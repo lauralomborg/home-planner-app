@@ -29,6 +29,7 @@ interface ProjectState {
   // Project actions
   createProject: (name?: string) => string
   loadProject: (id: string) => boolean
+  restoreProjectMetadataOnly: (id: string) => boolean
   saveProject: () => void
   deleteProject: (id: string) => void
   duplicateProject: (id: string) => string | null
@@ -101,6 +102,23 @@ export const useProjectStore = create<ProjectState>()(
         // Load floor plan into floor plan store
         useFloorPlanStore.getState().loadFloorPlan(project.floorPlan)
 
+        return true
+      },
+
+      // Restore project metadata without overwriting floor plan store
+      // Used after hydration when floor plan is already restored from its own persistence
+      restoreProjectMetadataOnly: (id) => {
+        const project = get()._loadProjectData(id)
+        if (!project) return false
+
+        set((state) => {
+          state.currentProjectId = project.id
+          state.currentProject = project
+          state.isDirty = false
+          state.lastSavedAt = project.updatedAt
+        })
+
+        // DON'T call loadFloorPlan - floor plan store already has correct data from hydration
         return true
       },
 

@@ -6,7 +6,7 @@ import { useProjectStore, useActiveView, useFloorPlanStore } from '@/stores'
 import { useKeyboardShortcuts } from '@/hooks/useUndo'
 
 function App() {
-  const { currentProject, createProject, _updateProjectList } = useProjectStore()
+  const { currentProject, createProject, restoreProjectMetadataOnly, _updateProjectList } = useProjectStore()
   const activeView = useActiveView()
   const [isHydrated, setIsHydrated] = useState(false)
 
@@ -46,7 +46,18 @@ function App() {
     if (!isHydrated) return
 
     _updateProjectList()
-    if (!currentProject) {
+
+    // Get the persisted currentProjectId from the project store
+    const persistedProjectId = useProjectStore.getState().currentProjectId
+
+    if (persistedProjectId && !currentProject) {
+      // Restore project metadata only - floor plan already hydrated from its own store
+      const restored = restoreProjectMetadataOnly(persistedProjectId)
+      if (!restored) {
+        // Project data was deleted, create a new one
+        createProject('My First Home')
+      }
+    } else if (!currentProject) {
       createProject('My First Home')
     }
   }, [isHydrated])
