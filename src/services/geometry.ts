@@ -569,6 +569,98 @@ export function calculatePositionOnWall(wall: Wall, positionAlongWall: number): 
   }
 }
 
+// ==================== Opening Wall Detection ====================
+
+/**
+ * Projects a point onto a line segment and returns the distance and position along the segment.
+ */
+function projectPointOntoSegment(
+  point: Point2D,
+  segStart: Point2D,
+  segEnd: Point2D
+): { distance: number; t: number; projectedPoint: Point2D } {
+  const dx = segEnd.x - segStart.x
+  const dy = segEnd.y - segStart.y
+  const segLengthSq = dx * dx + dy * dy
+
+  if (segLengthSq === 0) {
+    // Segment is a point
+    const dist = Math.sqrt(
+      Math.pow(point.x - segStart.x, 2) + Math.pow(point.y - segStart.y, 2)
+    )
+    return { distance: dist, t: 0, projectedPoint: { ...segStart } }
+  }
+
+  // Calculate t (position along segment, 0-1)
+  const t = Math.max(
+    0,
+    Math.min(
+      1,
+      ((point.x - segStart.x) * dx + (point.y - segStart.y) * dy) / segLengthSq
+    )
+  )
+
+  // Calculate projected point
+  const projX = segStart.x + t * dx
+  const projY = segStart.y + t * dy
+
+  // Calculate distance from point to projected point
+  const distance = Math.sqrt(
+    Math.pow(point.x - projX, 2) + Math.pow(point.y - projY, 2)
+  )
+
+  return {
+    distance,
+    t,
+    projectedPoint: { x: projX, y: projY },
+  }
+}
+
+/**
+ * Finds the nearest wall to a given position within a threshold distance.
+ * Used for dragging doors/windows between walls.
+ * @param pos The position to check
+ * @param walls Array of walls to search
+ * @param excludeWallId Optional wall ID to exclude from search (e.g., current wall)
+ * @param threshold Maximum distance to consider (default 30cm)
+ * @returns The nearest wall info or null if none found within threshold
+ */
+export function findNearestWall(
+  pos: Point2D,
+  walls: Wall[],
+  excludeWallId?: string,
+  threshold: number = 30
+): { wall: Wall; position: number; distance: number } | null {
+  let nearestWall: Wall | null = null
+  let nearestDistance = threshold
+  let nearestPosition = 0
+
+  for (const wall of walls) {
+    if (excludeWallId && wall.id === excludeWallId) continue
+
+    const { distance, t } = projectPointOntoSegment(pos, wall.start, wall.end)
+
+    if (distance < nearestDistance) {
+      nearestDistance = distance
+      nearestWall = wall
+
+      // Calculate position along wall in actual units
+      const dx = wall.end.x - wall.start.x
+      const dy = wall.end.y - wall.start.y
+      const wallLength = Math.sqrt(dx * dx + dy * dy)
+      nearestPosition = t * wallLength
+    }
+  }
+
+  if (!nearestWall) return null
+
+  return {
+    wall: nearestWall,
+    position: nearestPosition,
+    distance: nearestDistance,
+  }
+}
+
 // ==================== Room Detection ====================
 
 /**

@@ -837,9 +837,40 @@ export const useFloorPlanStore = create<FloorPlanState>()(
     updateWindow: (id, updates) => {
       set((state) => {
         const window = state.floorPlan.windows.find((w) => w.id === id)
-        if (window) {
-          Object.assign(window, updates)
-          // Update corresponding wall opening
+        if (!window) return
+
+        const oldWallId = window.wallId
+        const newWallId = updates.wallId ?? oldWallId
+        const isWallChange = newWallId !== oldWallId
+
+        // If wall is changing, handle the transfer
+        if (isWallChange) {
+          // Remove opening from old wall
+          const oldWall = state.floorPlan.walls.find((w) => w.id === oldWallId)
+          if (oldWall) {
+            oldWall.openings = oldWall.openings.filter((o) => o.referenceId !== id)
+          }
+
+          // Add opening to new wall
+          const newWall = state.floorPlan.walls.find((w) => w.id === newWallId)
+          if (newWall) {
+            newWall.openings.push({
+              id: crypto.randomUUID(),
+              type: 'window',
+              position: updates.position ?? window.position,
+              width: updates.width ?? window.width,
+              height: updates.height ?? window.height,
+              elevationFromFloor: updates.elevationFromFloor ?? window.elevationFromFloor,
+              referenceId: id,
+            })
+          }
+        }
+
+        // Apply updates to window
+        Object.assign(window, updates)
+
+        // Update corresponding wall opening (only if wall didn't change)
+        if (!isWallChange) {
           const wall = state.floorPlan.walls.find((w) => w.id === window.wallId)
           if (wall) {
             const opening = wall.openings.find((o) => o.referenceId === id)
@@ -903,9 +934,40 @@ export const useFloorPlanStore = create<FloorPlanState>()(
     updateDoor: (id, updates) => {
       set((state) => {
         const door = state.floorPlan.doors.find((d) => d.id === id)
-        if (door) {
-          Object.assign(door, updates)
-          // Update corresponding wall opening
+        if (!door) return
+
+        const oldWallId = door.wallId
+        const newWallId = updates.wallId ?? oldWallId
+        const isWallChange = newWallId !== oldWallId
+
+        // If wall is changing, handle the transfer
+        if (isWallChange) {
+          // Remove opening from old wall
+          const oldWall = state.floorPlan.walls.find((w) => w.id === oldWallId)
+          if (oldWall) {
+            oldWall.openings = oldWall.openings.filter((o) => o.referenceId !== id)
+          }
+
+          // Add opening to new wall
+          const newWall = state.floorPlan.walls.find((w) => w.id === newWallId)
+          if (newWall) {
+            newWall.openings.push({
+              id: crypto.randomUUID(),
+              type: 'door',
+              position: updates.position ?? door.position,
+              width: updates.width ?? door.width,
+              height: updates.height ?? door.height,
+              elevationFromFloor: 0,
+              referenceId: id,
+            })
+          }
+        }
+
+        // Apply updates to door
+        Object.assign(door, updates)
+
+        // Update corresponding wall opening (only if wall didn't change)
+        if (!isWallChange) {
           const wall = state.floorPlan.walls.find((w) => w.id === door.wallId)
           if (wall) {
             const opening = wall.openings.find((o) => o.referenceId === id)

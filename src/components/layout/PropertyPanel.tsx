@@ -8,6 +8,8 @@ import {
   WallProperties,
   RoomProperties,
   FurnitureProperties,
+  DoorProperties,
+  WindowProperties,
   MultipleSelection,
   NoSelection,
   FurnitureCatalog,
@@ -23,9 +25,12 @@ export function PropertyPanel() {
   const selectedFurniture = floorPlan.furniture.filter((f) =>
     selectedIds.includes(f.id)
   )
+  const selectedDoors = floorPlan.doors.filter((d) => selectedIds.includes(d.id))
+  const selectedWindows = floorPlan.windows.filter((w) => selectedIds.includes(w.id))
 
   const totalSelected =
-    selectedWalls.length + selectedRooms.length + selectedFurniture.length
+    selectedWalls.length + selectedRooms.length + selectedFurniture.length +
+    selectedDoors.length + selectedWindows.length
 
   // Show furniture catalog when furniture tool is active and nothing selected
   const showFurnitureCatalog = activeTool === 'furniture' && totalSelected === 0
@@ -36,6 +41,8 @@ export function PropertyPanel() {
     if (selectedWalls.length === 1) return 'Wall'
     if (selectedRooms.length === 1) return 'Room'
     if (selectedFurniture.length === 1) return 'Furniture'
+    if (selectedDoors.length === 1) return 'Door'
+    if (selectedWindows.length === 1) return 'Window'
     return 'Properties'
   }
 
@@ -72,6 +79,12 @@ export function PropertyPanel() {
                 )}
                 {selectedFurniture.length === 1 && (
                   <FurnitureProperties furniture={selectedFurniture[0]} />
+                )}
+                {selectedDoors.length === 1 && (
+                  <DoorProperties door={selectedDoors[0]} />
+                )}
+                {selectedWindows.length === 1 && (
+                  <WindowProperties window={selectedWindows[0]} />
                 )}
               </>
             )}
