@@ -3,18 +3,45 @@ import { Button } from '@/components/ui/button'
 import { useFloorPlanStore } from '@/stores'
 import type { RoomConnection } from '@/models'
 import { PropertyRow, PropertySection } from './PropertyComponents'
-import { Link2, Unlink, Plus, Trash2 } from 'lucide-react'
+import { Link2, Unlink } from 'lucide-react'
+
+/**
+ * Computes the overlap length between two rooms based on their current positions.
+ */
+function computeOverlapLength(
+  connection: RoomConnection,
+  room1Bounds: { x: number; y: number; width: number; height: number } | undefined,
+  room2Bounds: { x: number; y: number; width: number; height: number } | undefined
+): number {
+  if (!room1Bounds || !room2Bounds) return 0
+
+  if (connection.axis === 'horizontal') {
+    // Top/bottom connection - overlap is along the X axis
+    const overlapStart = Math.max(room1Bounds.x, room2Bounds.x)
+    const overlapEnd = Math.min(
+      room1Bounds.x + room1Bounds.width,
+      room2Bounds.x + room2Bounds.width
+    )
+    return Math.max(0, overlapEnd - overlapStart)
+  } else {
+    // Left/right connection - overlap is along the Y axis
+    const overlapStart = Math.max(room1Bounds.y, room2Bounds.y)
+    const overlapEnd = Math.min(
+      room1Bounds.y + room1Bounds.height,
+      room2Bounds.y + room2Bounds.height
+    )
+    return Math.max(0, overlapEnd - overlapStart)
+  }
+}
 
 export function ConnectionProperties({ connection }: { connection: RoomConnection }) {
-  const { updateRoomConnection, removeRoomConnection, getRoomById, addConnectionOpening, removeConnectionOpening } = useFloorPlanStore()
+  const { updateRoomConnection, removeRoomConnection, getRoomById } = useFloorPlanStore()
 
   const room1 = getRoomById(connection.roomIds[0])
   const room2 = getRoomById(connection.roomIds[1])
 
-  const edgeLength = Math.sqrt(
-    Math.pow(connection.sharedEdge.end.x - connection.sharedEdge.start.x, 2) +
-    Math.pow(connection.sharedEdge.end.y - connection.sharedEdge.start.y, 2)
-  )
+  // Compute edge length dynamically from current room positions
+  const edgeLength = computeOverlapLength(connection, room1?.bounds, room2?.bounds)
 
   return (
     <div className="space-y-6">
@@ -33,6 +60,11 @@ export function ConnectionProperties({ connection }: { connection: RoomConnectio
             <option value="direct">Direct (No Wall)</option>
           </select>
         </PropertyRow>
+        <p className="text-xs text-muted-foreground mt-2">
+          {connection.type === 'wall'
+            ? 'A shared wall separates the rooms. Each room keeps its portion of the wall where they don\'t overlap.'
+            : 'The rooms connect directly with no wall between them where they touch.'}
+        </p>
       </PropertySection>
 
       <Separator className="bg-border/40" />
@@ -58,69 +90,6 @@ export function ConnectionProperties({ connection }: { connection: RoomConnectio
           <div className="text-xs text-muted-foreground">meters</div>
         </div>
       </PropertySection>
-
-      {connection.type === 'direct' && (
-        <>
-          <Separator className="bg-border/40" />
-          <PropertySection title="Opening">
-            <p className="text-xs text-muted-foreground mb-2">
-              Direct connections have a full opening between rooms.
-            </p>
-            <Button
-              variant="outline"
-              size="sm"
-              className="w-full"
-              onClick={() => updateRoomConnection(connection.id, { type: 'wall' })}
-            >
-              Convert to Wall
-            </Button>
-          </PropertySection>
-        </>
-      )}
-
-      {connection.type === 'wall' && (
-        <>
-          <Separator className="bg-border/40" />
-          <PropertySection title="Openings">
-            {connection.openings.length > 0 ? (
-              <div className="space-y-2">
-                {connection.openings.map((opening, index) => (
-                  <div key={opening.id} className="p-3 bg-muted/30 rounded-lg flex items-center justify-between">
-                    <div>
-                      <div className="text-sm font-medium">Opening {index + 1}</div>
-                      <div className="text-xs text-muted-foreground">
-                        Position: {(opening.position * 100).toFixed(0)}% |
-                        Width: {(opening.width * 100).toFixed(0)}%
-                      </div>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                      onClick={() => removeConnectionOpening(connection.id, opening.id)}
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-xs text-muted-foreground mb-2">
-                No openings. Add an opening to create a passage in the wall.
-              </p>
-            )}
-            <Button
-              variant="outline"
-              size="sm"
-              className="w-full mt-2"
-              onClick={() => addConnectionOpening(connection.id, { position: 0.25, width: 0.5 })}
-            >
-              <Plus className="w-4 h-4 mr-2" />
-              Add Opening
-            </Button>
-          </PropertySection>
-        </>
-      )}
 
       <Separator className="bg-border/40" />
 

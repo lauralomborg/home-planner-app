@@ -35,7 +35,9 @@ export const RoomShape = memo(function RoomShape({
   const pendingConnectionRef = useRef<{
     adjacentRoomId: string
     connectionType: 'wall' | 'direct'
-    sharedEdge: { start: { x: number; y: number }; end: { x: number; y: number } }
+    axis: 'horizontal' | 'vertical'
+    proposedSide: 'top' | 'right' | 'bottom' | 'left'
+    adjacentSide: 'top' | 'right' | 'bottom' | 'left'
   } | null>(null)
 
   // Use bounds directly instead of deriving from walls
@@ -89,11 +91,13 @@ export const RoomShape = memo(function RoomShape({
           setRoomSnapGuides(snapResult.snapGuides)
 
           // Track pending connection for when drag ends
-          if (snapResult.connectionType && snapResult.adjacentRoomId && snapResult.sharedEdge) {
+          if (snapResult.connectionType && snapResult.adjacentRoomId && snapResult.connectionInfo) {
             pendingConnectionRef.current = {
               adjacentRoomId: snapResult.adjacentRoomId,
               connectionType: snapResult.connectionType,
-              sharedEdge: snapResult.sharedEdge,
+              axis: snapResult.connectionInfo.axis,
+              proposedSide: snapResult.connectionInfo.proposedSide,
+              adjacentSide: snapResult.connectionInfo.adjacentSide,
             }
           } else {
             pendingConnectionRef.current = null
@@ -137,13 +141,11 @@ export const RoomShape = memo(function RoomShape({
               addRoomConnection({
                 roomIds: [room.id, adj.roomId],
                 type: connectionType,
-                sharedEdge: adj.sharedEdge,
-                openings: [],
+                axis: adj.axis,
+                roomSides: [adj.proposedSide, adj.adjacentSide],
               })
-            } else {
-              // Update existing connection's shared edge
-              // (edge might have changed if room was resized)
             }
+            // No need to update existing connections - overlap is computed dynamically
           }
 
           pendingConnectionRef.current = null

@@ -16,7 +16,6 @@ import type {
   RoomType,
   Dimensions3D,
   RoomConnection,
-  ConnectionOpening,
 } from '@/models'
 import {
   detectRooms as detectRoomsFromWalls,
@@ -163,9 +162,6 @@ interface FloorPlanState {
   removeRoomConnection: (id: string) => void
   getConnectionBetweenRooms: (roomId1: string, roomId2: string) => RoomConnection | undefined
   getConnectionsForRoom: (roomId: string) => RoomConnection[]
-  addConnectionOpening: (connectionId: string, opening: Omit<ConnectionOpening, 'id'>) => string | null
-  updateConnectionOpening: (connectionId: string, openingId: string, updates: Partial<Omit<ConnectionOpening, 'id'>>) => void
-  removeConnectionOpening: (connectionId: string, openingId: string) => void
   regenerateRoomWalls: (roomId: string) => void
   regenerateAllRoomWalls: () => void
 
@@ -1607,6 +1603,21 @@ export const useFloorPlanStore = create<FloorPlanState>()(
 
       // Update containment for this room's children
       get().updateRoomContainment(roomId)
+
+      // Regenerate walls for this room and all connected rooms
+      // This ensures wall exclusions are recalculated based on new positions
+      const connections = get().floorPlan.roomConnections.filter(
+        (c) => c.roomIds.includes(roomId)
+      )
+
+      // Regenerate this room's walls
+      get().regenerateRoomWalls(roomId)
+
+      // Regenerate connected rooms' walls (their exclusions depend on our position)
+      for (const conn of connections) {
+        const otherRoomId = conn.roomIds[0] === roomId ? conn.roomIds[1] : conn.roomIds[0]
+        get().regenerateRoomWalls(otherRoomId)
+      }
     },
 
     reparentRoom: (roomId, newParentRoomId) => {
@@ -1705,60 +1716,6 @@ export const useFloorPlanStore = create<FloorPlanState>()(
       )
     },
 
-    addConnectionOpening: (connectionId, opening) => {
-      const id = crypto.randomUUID()
-      const connection = get().floorPlan.roomConnections.find((c) => c.id === connectionId)
-      if (!connection) return null
-
-      set((state) => {
-        const conn = state.floorPlan.roomConnections.find((c) => c.id === connectionId)
-        if (conn) {
-          conn.openings.push({
-            ...opening,
-            id,
-          })
-        }
-      })
-
-      // Regenerate walls for both rooms to reflect the new opening
-      get().regenerateRoomWalls(connection.roomIds[0])
-      get().regenerateRoomWalls(connection.roomIds[1])
-      return id
-    },
-
-    updateConnectionOpening: (connectionId, openingId, updates) => {
-      const connection = get().floorPlan.roomConnections.find((c) => c.id === connectionId)
-      set((state) => {
-        const conn = state.floorPlan.roomConnections.find((c) => c.id === connectionId)
-        if (conn) {
-          const opening = conn.openings.find((o) => o.id === openingId)
-          if (opening) {
-            Object.assign(opening, updates)
-          }
-        }
-      })
-      // Regenerate walls for both rooms to reflect the updated opening
-      if (connection) {
-        get().regenerateRoomWalls(connection.roomIds[0])
-        get().regenerateRoomWalls(connection.roomIds[1])
-      }
-    },
-
-    removeConnectionOpening: (connectionId, openingId) => {
-      const connection = get().floorPlan.roomConnections.find((c) => c.id === connectionId)
-      set((state) => {
-        const conn = state.floorPlan.roomConnections.find((c) => c.id === connectionId)
-        if (conn) {
-          conn.openings = conn.openings.filter((o) => o.id !== openingId)
-        }
-      })
-      // Regenerate walls for both rooms to reflect the removed opening
-      if (connection) {
-        get().regenerateRoomWalls(connection.roomIds[0])
-        get().regenerateRoomWalls(connection.roomIds[1])
-      }
-    },
-
     getRoomConnectionById: (id) =>
       get().floorPlan.roomConnections.find((c) => c.id === id),
 
@@ -1771,6 +1728,9 @@ export const useFloorPlanStore = create<FloorPlanState>()(
       const connections = state.floorPlan.roomConnections.filter(
         (c) => c.roomIds.includes(roomId)
       )
+
+      // Get all rooms for dynamic overlap computation
+      const allRooms = state.floorPlan.rooms
 
       set((draft) => {
         // Get existing walls for this room
@@ -1788,8 +1748,8 @@ export const useFloorPlanStore = create<FloorPlanState>()(
         // Remove old walls
         draft.floorPlan.walls = draft.floorPlan.walls.filter((w) => w.ownerRoomId !== roomId)
 
-        // Generate new walls considering connections
-        const wallData = generateWallsFromBoundsWithConnections(room.bounds, roomId, connections)
+        // Generate new walls considering connections (pass allRooms for dynamic computation)
+        const wallData = generateWallsFromBoundsWithConnections(room.bounds, roomId, connections, allRooms)
         const newWallIds: string[] = []
 
         for (const wall of wallData) {
@@ -1918,7 +1878,7 @@ export const useFloorPlanStore = create<FloorPlanState>()(
   })),
     {
       name: 'home-planner-floorplan',
-      version: 4,
+      version: 5,
       migrate: (persistedState: unknown, version: number) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const state = persistedState as { floorPlan: FloorPlan & { furniture: any[]; groups: any[]; rooms: any[]; roomConnections?: any[] } }
@@ -1972,6 +1932,64 @@ export const useFloorPlanStore = create<FloorPlanState>()(
           // Migration from v3 to v4: add roomConnections array
           if (!state.floorPlan.roomConnections) {
             state.floorPlan.roomConnections = []
+          }
+        }
+
+        if (version <= 4) {
+          // Migration from v4 to v5: convert sharedEdge to axis/roomSides
+          // This fixes the fundamental design issue where stored coordinates become stale
+          for (const conn of state.floorPlan.roomConnections || []) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const oldConn = conn as any
+            if (oldConn.sharedEdge && !oldConn.axis) {
+              const { start, end } = oldConn.sharedEdge
+
+              // Determine axis from the shared edge direction
+              const isHorizontal = Math.abs(start.y - end.y) < 1
+              oldConn.axis = isHorizontal ? 'horizontal' : 'vertical'
+
+              // Infer roomSides from sharedEdge position relative to rooms
+              const room1 = state.floorPlan.rooms.find((r: { id: string }) => r.id === conn.roomIds[0])
+              const room2 = state.floorPlan.rooms.find((r: { id: string }) => r.id === conn.roomIds[1])
+
+              if (room1 && room2) {
+                if (isHorizontal) {
+                  // Horizontal edge - determine which room is above/below
+                  const room1Bottom = room1.bounds.y + room1.bounds.height
+                  const room2Top = room2.bounds.y
+                  const room1Top = room1.bounds.y
+                  const room2Bottom = room2.bounds.y + room2.bounds.height
+
+                  if (Math.abs(room1Bottom - room2Top) < Math.abs(room1Top - room2Bottom)) {
+                    // Room1's bottom connects to Room2's top
+                    oldConn.roomSides = ['bottom', 'top']
+                  } else {
+                    // Room1's top connects to Room2's bottom
+                    oldConn.roomSides = ['top', 'bottom']
+                  }
+                } else {
+                  // Vertical edge - determine which room is left/right
+                  const room1Right = room1.bounds.x + room1.bounds.width
+                  const room2Left = room2.bounds.x
+                  const room1Left = room1.bounds.x
+                  const room2Right = room2.bounds.x + room2.bounds.width
+
+                  if (Math.abs(room1Right - room2Left) < Math.abs(room1Left - room2Right)) {
+                    // Room1's right connects to Room2's left
+                    oldConn.roomSides = ['right', 'left']
+                  } else {
+                    // Room1's left connects to Room2's right
+                    oldConn.roomSides = ['left', 'right']
+                  }
+                }
+              } else {
+                // Fallback if rooms not found
+                oldConn.roomSides = isHorizontal ? ['bottom', 'top'] : ['right', 'left']
+              }
+
+              // Remove old sharedEdge property
+              delete oldConn.sharedEdge
+            }
           }
         }
 
