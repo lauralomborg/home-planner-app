@@ -32,13 +32,17 @@ export function Canvas2D() {
   const [isDraggingFurniture, setIsDraggingFurniture] = useState(false)
   const draggedIdsRef = useRef<string[]>([])
 
-  // Track selected nodes for transformer
+  // Track selected nodes for transformer (furniture/rooms)
   const selectedNodesRef = useRef<Map<string, Konva.Rect>>(new Map())
+
+  // Door/window transformer (width-only, no rotation)
+  const doorWindowTransformerRef = useRef<Konva.Transformer>(null)
+  const selectedDoorWindowNodesRef = useRef<Map<string, Konva.Rect>>(new Map())
 
   // Track when marquee selection just finished to prevent click handler from clearing it
   const justFinishedMarqueeRef = useRef(false)
 
-  // Callbacks for registering/unregistering nodes with transformer
+  // Callbacks for registering/unregistering nodes with transformer (furniture/rooms)
   const handleRegisterNode = useCallback((id: string, node: Konva.Rect) => {
     selectedNodesRef.current.set(id, node)
     if (transformerRef.current) {
@@ -50,6 +54,21 @@ export function Canvas2D() {
     selectedNodesRef.current.delete(id)
     if (transformerRef.current) {
       transformerRef.current.nodes(Array.from(selectedNodesRef.current.values()))
+    }
+  }, [])
+
+  // Callbacks for registering/unregistering door/window nodes (width-only resize)
+  const handleRegisterDoorWindowNode = useCallback((id: string, node: Konva.Rect) => {
+    selectedDoorWindowNodesRef.current.set(id, node)
+    if (doorWindowTransformerRef.current) {
+      doorWindowTransformerRef.current.nodes(Array.from(selectedDoorWindowNodesRef.current.values()))
+    }
+  }, [])
+
+  const handleUnregisterDoorWindowNode = useCallback((id: string) => {
+    selectedDoorWindowNodesRef.current.delete(id)
+    if (doorWindowTransformerRef.current) {
+      doorWindowTransformerRef.current.nodes(Array.from(selectedDoorWindowNodesRef.current.values()))
     }
   }, [])
 
@@ -602,14 +621,34 @@ export function Canvas2D() {
           {windows.map((window) => {
             const wall = wallsById.get(window.wallId)
             if (!wall) return null
-            return <WindowShape key={window.id} window={window} wall={wall} isSelected={selectedIds.includes(window.id)} scale={zoom2D} />
+            return (
+              <WindowShape
+                key={window.id}
+                window={window}
+                wall={wall}
+                isSelected={selectedIds.includes(window.id)}
+                scale={zoom2D}
+                onRegisterNode={handleRegisterDoorWindowNode}
+                onUnregisterNode={handleUnregisterDoorWindowNode}
+              />
+            )
           })}
 
           {/* Doors */}
           {doors.map((door) => {
             const wall = wallsById.get(door.wallId)
             if (!wall) return null
-            return <DoorShape key={door.id} door={door} wall={wall} isSelected={selectedIds.includes(door.id)} scale={zoom2D} />
+            return (
+              <DoorShape
+                key={door.id}
+                door={door}
+                wall={wall}
+                isSelected={selectedIds.includes(door.id)}
+                scale={zoom2D}
+                onRegisterNode={handleRegisterDoorWindowNode}
+                onUnregisterNode={handleUnregisterDoorWindowNode}
+              />
+            )
           })}
 
           {/* Furniture */}
@@ -624,7 +663,7 @@ export function Canvas2D() {
             />
           ))}
 
-          {/* Transformer */}
+          {/* Transformer (furniture/rooms - full resize + rotation) */}
           <Transformer
             ref={transformerRef}
             rotateEnabled={true}
@@ -637,6 +676,20 @@ export function Canvas2D() {
             borderStrokeWidth={1 / zoom2D}
             enabledAnchors={['top-left', 'top-right', 'bottom-left', 'bottom-right', 'top-center', 'bottom-center', 'middle-left', 'middle-right']}
             boundBoxFunc={(oldBox, newBox) => (newBox.width < 20 || newBox.height < 20) ? oldBox : newBox}
+          />
+
+          {/* Door/Window Transformer (width-only, no rotation) */}
+          <Transformer
+            ref={doorWindowTransformerRef}
+            rotateEnabled={false}
+            anchorSize={8 / zoom2D}
+            anchorStroke={COLORS_2D.handle}
+            anchorFill={COLORS_2D.handleFill}
+            anchorCornerRadius={2 / zoom2D}
+            borderStroke={COLORS_2D.handle}
+            borderStrokeWidth={1 / zoom2D}
+            enabledAnchors={['middle-left', 'middle-right']}
+            boundBoxFunc={(oldBox, newBox) => (newBox.width < 30) ? oldBox : newBox}
           />
 
           {/* Wall drawing preview */}

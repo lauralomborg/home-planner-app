@@ -1,6 +1,7 @@
-import { memo, useCallback, useRef } from 'react'
+import { memo, useCallback, useRef, useEffect } from 'react'
 import { Rect, Line, Group } from 'react-konva'
 import type { KonvaEventObject } from 'konva/lib/Node'
+import type Konva from 'konva'
 import { useEditorStore, useFloorPlanStore } from '@/stores'
 import { COLORS_2D } from '@/constants/colors'
 import { handleSelectWithModifiers } from '../types'
@@ -12,6 +13,8 @@ interface WindowShapeProps {
   wall: Wall
   isSelected: boolean
   scale: number
+  onRegisterNode: (id: string, node: Konva.Rect) => void
+  onUnregisterNode: (id: string) => void
 }
 
 export const WindowShape = memo(function WindowShape({
@@ -19,10 +22,15 @@ export const WindowShape = memo(function WindowShape({
   wall,
   isSelected,
   scale,
+  onRegisterNode,
+  onUnregisterNode,
 }: WindowShapeProps) {
   const { select, addToSelection, toggleSelection, setHovered, setIsDragging } = useEditorStore()
   const { updateWindow } = useFloorPlanStore()
   const floorPlan = useFloorPlanStore((state) => state.floorPlan)
+
+  // Ref for the main rect shape (used for transformer)
+  const shapeRef = useRef<Konva.Rect>(null)
 
   // Track target wall during drag for wall-to-wall transfer
   const targetWallRef = useRef<{ wallId: string; position: number } | null>(null)
@@ -34,6 +42,33 @@ export const WindowShape = memo(function WindowShape({
 
   const windowWidth = window.width
   const thickness = wall.thickness + 4
+
+  // Register/unregister with transformer when selected
+  useEffect(() => {
+    if (isSelected && shapeRef.current) {
+      onRegisterNode(window.id, shapeRef.current)
+    } else {
+      onUnregisterNode(window.id)
+    }
+    return () => onUnregisterNode(window.id)
+  }, [isSelected, window.id, onRegisterNode, onUnregisterNode])
+
+  // Handle transform end (resize width only)
+  const handleTransformEnd = useCallback(() => {
+    const node = shapeRef.current
+    if (!node) return
+
+    const scaleX = node.scaleX()
+
+    // Reset scale on the node
+    node.scaleX(1)
+    node.scaleY(1)
+
+    // Calculate new width (minimum 30cm)
+    const newWidth = Math.max(30, windowWidth * scaleX)
+
+    updateWindow(window.id, { width: newWidth })
+  }, [windowWidth, window.id, updateWindow])
 
   // Handle drag to move window along wall or to another wall
   const handleDragMove = useCallback((e: KonvaEventObject<DragEvent>) => {
@@ -132,6 +167,7 @@ export const WindowShape = memo(function WindowShape({
     >
       {/* Window frame */}
       <Rect
+        ref={shapeRef}
         x={-windowWidth / 2}
         y={-thickness / 2}
         width={windowWidth}
@@ -140,6 +176,7 @@ export const WindowShape = memo(function WindowShape({
         stroke={isSelected ? COLORS_2D.wallSelected : COLORS_2D.windowFrame}
         strokeWidth={2 / scale}
         cornerRadius={2}
+        onTransformEnd={handleTransformEnd}
       />
       {/* Glass lines */}
       <Line

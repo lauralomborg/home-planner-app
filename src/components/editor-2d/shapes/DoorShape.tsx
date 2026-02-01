@@ -1,6 +1,7 @@
-import { memo, useCallback, useRef } from 'react'
+import { memo, useCallback, useRef, useEffect } from 'react'
 import { Rect, Line, Arc, Group } from 'react-konva'
 import type { KonvaEventObject } from 'konva/lib/Node'
+import type Konva from 'konva'
 import { useEditorStore, useFloorPlanStore } from '@/stores'
 import { COLORS_2D } from '@/constants/colors'
 import { handleSelectWithModifiers } from '../types'
@@ -12,6 +13,8 @@ interface DoorShapeProps {
   wall: Wall
   isSelected: boolean
   scale: number
+  onRegisterNode: (id: string, node: Konva.Rect) => void
+  onUnregisterNode: (id: string) => void
 }
 
 export const DoorShape = memo(function DoorShape({
@@ -19,10 +22,15 @@ export const DoorShape = memo(function DoorShape({
   wall,
   isSelected,
   scale,
+  onRegisterNode,
+  onUnregisterNode,
 }: DoorShapeProps) {
   const { select, addToSelection, toggleSelection, setHovered, setIsDragging } = useEditorStore()
   const { updateDoor } = useFloorPlanStore()
   const floorPlan = useFloorPlanStore((state) => state.floorPlan)
+
+  // Ref for the main rect shape (used for transformer)
+  const shapeRef = useRef<Konva.Rect>(null)
 
   // Track target wall during drag for wall-to-wall transfer
   const targetWallRef = useRef<{ wallId: string; position: number } | null>(null)
@@ -34,6 +42,33 @@ export const DoorShape = memo(function DoorShape({
 
   const doorWidth = door.width
   const thickness = wall.thickness + 4
+
+  // Register/unregister with transformer when selected
+  useEffect(() => {
+    if (isSelected && shapeRef.current) {
+      onRegisterNode(door.id, shapeRef.current)
+    } else {
+      onUnregisterNode(door.id)
+    }
+    return () => onUnregisterNode(door.id)
+  }, [isSelected, door.id, onRegisterNode, onUnregisterNode])
+
+  // Handle transform end (resize width only)
+  const handleTransformEnd = useCallback(() => {
+    const node = shapeRef.current
+    if (!node) return
+
+    const scaleX = node.scaleX()
+
+    // Reset scale on the node
+    node.scaleX(1)
+    node.scaleY(1)
+
+    // Calculate new width (minimum 40cm)
+    const newWidth = Math.max(40, doorWidth * scaleX)
+
+    updateDoor(door.id, { width: newWidth })
+  }, [doorWidth, door.id, updateDoor])
 
   // Determine hinge position based on open direction
   // left/inward = hinge on left side, right/outward = hinge on right side
@@ -139,6 +174,7 @@ export const DoorShape = memo(function DoorShape({
     >
       {/* Door opening */}
       <Rect
+        ref={shapeRef}
         x={-doorWidth / 2}
         y={-thickness / 2}
         width={doorWidth}
@@ -146,6 +182,7 @@ export const DoorShape = memo(function DoorShape({
         fill={COLORS_2D.canvas}
         stroke={isSelected ? COLORS_2D.wallSelected : COLORS_2D.doorFrame}
         strokeWidth={2 / scale}
+        onTransformEnd={handleTransformEnd}
       />
       {/* Door swing arc */}
       <Arc
