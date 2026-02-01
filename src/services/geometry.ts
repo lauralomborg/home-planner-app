@@ -1,14 +1,15 @@
 import type {
   Point2D,
   Wall,
-  WallOpening,
   Room,
   RoomBounds,
   RoomType,
   MaterialRef,
   FurnitureInstance,
   RoomConnection,
+  RoomSide,
 } from '@/models'
+import { DEFAULT_WALL_THICKNESS } from '@/models'
 
 /**
  * Extracts a closed polygon from a set of connected walls.
@@ -291,25 +292,50 @@ export function generateWallsFromBounds(
 }
 
 /**
- * Determines which edges of a room should have walls based on room connections.
- * Returns an object with boolean flags for each edge.
- *
- * For 'direct' connections: no wall on that edge for either room
- * For 'wall' connections: only the room with the lower ID generates the shared wall
+ * Represents an exclusion range along an edge where no wall should be generated.
+ * Coordinates are relative to the room bounds (0 = edge start, width/height = edge end).
  */
-export function getWallEdgesForRoom(
+export interface EdgeExclusion {
+  start: number  // Start coordinate along the edge
+  end: number    // End coordinate along the edge
+}
+
+/**
+ * Exclusion ranges for each edge of a room.
+ * For horizontal edges (top/bottom): coordinates are x-values
+ * For vertical edges (left/right): coordinates are y-values
+ */
+export interface EdgeExclusions {
+  top: EdgeExclusion[]
+  right: EdgeExclusion[]
+  bottom: EdgeExclusion[]
+  left: EdgeExclusion[]
+}
+
+/**
+ * Determines which portions of each edge should NOT have walls based on room connections.
+ * Returns exclusion ranges per edge. Wall generation should skip these ranges.
+ *
+ * For 'direct' connections: exclude the overlapping portion on both rooms
+ * For 'wall' connections: exclude the overlapping portion on the room with higher ID
+ *                         (lower ID room generates the shared wall)
+ *
+ * @param roomId - The room to compute exclusions for
+ * @param roomBounds - The bounds of the room
+ * @param connections - All connections involving this room
+ * @param allRooms - All rooms (needed to compute dynamic overlap)
+ */
+export function getWallExclusionsForRoom(
   roomId: string,
   roomBounds: RoomBounds,
-  connections: RoomConnection[]
-): { top: boolean; right: boolean; bottom: boolean; left: boolean } {
-  const edges = { top: true, right: true, bottom: true, left: true }
-
-  // Room edge positions
-  const roomEdges = {
-    top: roomBounds.y,
-    bottom: roomBounds.y + roomBounds.height,
-    left: roomBounds.x,
-    right: roomBounds.x + roomBounds.width,
+  connections: RoomConnection[],
+  allRooms: Room[]
+): EdgeExclusions {
+  const exclusions: EdgeExclusions = {
+    top: [],
+    right: [],
+    bottom: [],
+    left: [],
   }
 
   for (const conn of connections) {
@@ -317,199 +343,423 @@ export function getWallEdgesForRoom(
     if (!conn.roomIds.includes(roomId)) continue
 
     const otherRoomId = conn.roomIds[0] === roomId ? conn.roomIds[1] : conn.roomIds[0]
-    const { start, end } = conn.sharedEdge
+    const otherRoom = allRooms.find((r) => r.id === otherRoomId)
+    if (!otherRoom) continue
 
-    // Determine which edge this connection is on
-    const isHorizontal = Math.abs(start.y - end.y) < 1
-    const isVertical = Math.abs(start.x - end.x) < 1
+    // For direct connections: both rooms lose their wall on the overlapping portion
+    // For wall connections: only the room with higher ID loses its wall (lower ID generates shared wall)
+    const shouldExclude = conn.type === 'direct' || roomId > otherRoomId
+    if (!shouldExclude) continue
 
-    if (isHorizontal) {
-      // Check if it's top or bottom edge
-      if (Math.abs(start.y - roomEdges.top) < 1) {
-        if (conn.type === 'direct') {
-          edges.top = false
-        } else if (conn.type === 'wall' && roomId > otherRoomId) {
-          // Only the room with lower ID generates the shared wall
-          edges.top = false
-        }
-      } else if (Math.abs(start.y - roomEdges.bottom) < 1) {
-        if (conn.type === 'direct') {
-          edges.bottom = false
-        } else if (conn.type === 'wall' && roomId > otherRoomId) {
-          edges.bottom = false
-        }
-      }
-    } else if (isVertical) {
-      // Check if it's left or right edge
-      if (Math.abs(start.x - roomEdges.left) < 1) {
-        if (conn.type === 'direct') {
-          edges.left = false
-        } else if (conn.type === 'wall' && roomId > otherRoomId) {
-          edges.left = false
-        }
-      } else if (Math.abs(start.x - roomEdges.right) < 1) {
-        if (conn.type === 'direct') {
-          edges.right = false
-        } else if (conn.type === 'wall' && roomId > otherRoomId) {
-          edges.right = false
-        }
-      }
-    }
+    // Compute the overlap dynamically from current room positions
+    const overlap = computeConnectionOverlap(roomBounds, otherRoom.bounds, conn, roomId)
+    if (!overlap) continue
+
+    // Add to the appropriate edge
+    exclusions[overlap.side].push(overlap.exclusion)
   }
 
-  return edges
+  // Merge overlapping exclusions on each edge
+  for (const edge of ['top', 'right', 'bottom', 'left'] as const) {
+    exclusions[edge] = mergeExclusions(exclusions[edge])
+  }
+
+  return exclusions
 }
 
 /**
- * Gets connection openings for a specific edge of a room.
- * Converts connection openings (normalized 0-1) to wall openings (in cm).
+ * Merges overlapping exclusion ranges into non-overlapping ranges.
  */
-function getConnectionOpeningsForEdge(
-  roomId: string,
-  edge: 'top' | 'right' | 'bottom' | 'left',
-  roomBounds: RoomBounds,
-  connections: RoomConnection[],
-  wallHeight: number
-): WallOpening[] {
-  const openings: WallOpening[] = []
+function mergeExclusions(exclusions: EdgeExclusion[]): EdgeExclusion[] {
+  if (exclusions.length <= 1) return exclusions
 
-  const roomEdges = {
-    top: roomBounds.y,
-    bottom: roomBounds.y + roomBounds.height,
-    left: roomBounds.x,
-    right: roomBounds.x + roomBounds.width,
-  }
+  // Sort by start position
+  const sorted = [...exclusions].sort((a, b) => a.start - b.start)
+  const merged: EdgeExclusion[] = [sorted[0]]
 
-  for (const conn of connections) {
-    if (!conn.roomIds.includes(roomId)) continue
-    if (conn.type !== 'wall') continue
-    if (conn.openings.length === 0) continue
+  for (let i = 1; i < sorted.length; i++) {
+    const current = sorted[i]
+    const last = merged[merged.length - 1]
 
-    const otherRoomId = conn.roomIds[0] === roomId ? conn.roomIds[1] : conn.roomIds[0]
-    // Only the room with the lower ID generates the shared wall
-    if (roomId > otherRoomId) continue
-
-    const { start, end } = conn.sharedEdge
-    const isHorizontal = Math.abs(start.y - end.y) < 1
-    const isVertical = Math.abs(start.x - end.x) < 1
-
-    // Determine which edge this connection is on
-    let matchesEdge = false
-    if (isHorizontal && edge === 'top' && Math.abs(start.y - roomEdges.top) < 1) matchesEdge = true
-    if (isHorizontal && edge === 'bottom' && Math.abs(start.y - roomEdges.bottom) < 1) matchesEdge = true
-    if (isVertical && edge === 'left' && Math.abs(start.x - roomEdges.left) < 1) matchesEdge = true
-    if (isVertical && edge === 'right' && Math.abs(start.x - roomEdges.right) < 1) matchesEdge = true
-
-    if (!matchesEdge) continue
-
-    // Calculate edge length
-    const edgeLength = Math.sqrt(
-      Math.pow(end.x - start.x, 2) + Math.pow(end.y - start.y, 2)
-    )
-
-    // Convert each opening from normalized to actual position
-    for (const connOpening of conn.openings) {
-      // openingPosition is the center position along the wall
-      const openingStart = connOpening.position * edgeLength
-      const openingWidth = connOpening.width * edgeLength
-      const openingCenter = openingStart + openingWidth / 2
-
-      openings.push({
-        id: connOpening.id,
-        type: 'door', // Openings in connections are treated as doors (floor-to-ceiling gaps)
-        position: openingCenter,
-        width: openingWidth,
-        height: wallHeight, // Full height opening
-        elevationFromFloor: 0,
-        referenceId: connOpening.id,
-      })
+    if (current.start <= last.end) {
+      // Overlapping or adjacent - extend the last exclusion
+      last.end = Math.max(last.end, current.end)
+    } else {
+      // No overlap - add as new exclusion
+      merged.push(current)
     }
   }
 
-  return openings
+  return merged
+}
+
+/**
+ * Computes the connection overlap dynamically from current room positions.
+ * Returns the exclusion range (in room-local coordinates) for the specified room's side.
+ *
+ * @param roomBounds - The bounds of the room to compute exclusion for
+ * @param otherRoomBounds - The bounds of the other connected room
+ * @param connection - The connection metadata
+ * @param forRoomId - Which room's perspective we're computing for
+ * @returns EdgeExclusion with start/end in room-local coordinates, or null if no overlap
+ */
+export function computeConnectionOverlap(
+  roomBounds: RoomBounds,
+  otherRoomBounds: RoomBounds,
+  connection: RoomConnection,
+  forRoomId: string
+): { exclusion: EdgeExclusion; side: RoomSide } | null {
+  const roomIndex = connection.roomIds[0] === forRoomId ? 0 : 1
+  const mySide = connection.roomSides[roomIndex]
+
+  if (connection.axis === 'horizontal') {
+    // Top/bottom connection - overlap is along the X axis
+    const overlapStart = Math.max(roomBounds.x, otherRoomBounds.x)
+    const overlapEnd = Math.min(
+      roomBounds.x + roomBounds.width,
+      otherRoomBounds.x + otherRoomBounds.width
+    )
+
+    if (overlapEnd <= overlapStart) return null
+
+    // Convert to room-local coordinates (relative to room's X origin)
+    return {
+      exclusion: {
+        start: overlapStart - roomBounds.x,
+        end: overlapEnd - roomBounds.x,
+      },
+      side: mySide,
+    }
+  } else {
+    // Left/right connection - overlap is along the Y axis
+    const overlapStart = Math.max(roomBounds.y, otherRoomBounds.y)
+    const overlapEnd = Math.min(
+      roomBounds.y + roomBounds.height,
+      otherRoomBounds.y + otherRoomBounds.height
+    )
+
+    if (overlapEnd <= overlapStart) return null
+
+    // Convert to room-local coordinates (relative to room's Y origin)
+    return {
+      exclusion: {
+        start: overlapStart - roomBounds.y,
+        end: overlapEnd - roomBounds.y,
+      },
+      side: mySide,
+    }
+  }
+}
+
+/**
+ * Represents a wall segment along an edge, with flags indicating whether
+ * the segment starts/ends at a room corner (edge boundary).
+ */
+export interface EdgeSegment {
+  start: number
+  end: number
+  startsAtEdge: boolean  // true if this segment starts at the room corner (0)
+  endsAtEdge: boolean    // true if this segment ends at the room corner (edgeLength)
+}
+
+/**
+ * Generates wall segments for an edge, skipping exclusion zones.
+ * Returns segments with boundary flags indicating if they start/end at room corners.
+ * This is important for applying halfT offsets only at actual room corners.
+ */
+function generateEdgeSegments(
+  edgeLength: number,
+  exclusions: EdgeExclusion[]
+): EdgeSegment[] {
+  if (exclusions.length === 0) {
+    return [{ start: 0, end: edgeLength, startsAtEdge: true, endsAtEdge: true }]
+  }
+
+  const segments: EdgeSegment[] = []
+  let currentPos = 0
+
+  for (const exclusion of exclusions) {
+    // Add segment before this exclusion
+    if (exclusion.start > currentPos) {
+      segments.push({
+        start: currentPos,
+        end: exclusion.start,
+        startsAtEdge: currentPos === 0,
+        endsAtEdge: false,  // ends at an exclusion boundary, not room edge
+      })
+    }
+    currentPos = exclusion.end
+  }
+
+  // Add final segment after last exclusion
+  if (currentPos < edgeLength) {
+    segments.push({
+      start: currentPos,
+      end: edgeLength,
+      startsAtEdge: false,  // starts at an exclusion boundary
+      endsAtEdge: true,
+    })
+  }
+
+  return segments
 }
 
 /**
  * Generates walls from rectangular bounds, taking into account room connections.
- * - For 'direct' connections: no wall on that edge
- * - For 'wall' connections: shared wall is owned by the room with lower ID
+ * Uses exclusion zones to generate partial wall segments where connections exist.
+ *
+ * - For 'direct' connections: no wall on the overlapping portion for either room
+ * - For 'wall' connections: only the room with lower ID generates wall segments
+ *                           (higher ID room has exclusion on that portion)
+ *
+ * The halfT offset is only applied at actual room corners, not at exclusion boundaries.
+ * This prevents wall protrusion at connection edges.
+ *
+ * @param bounds - The room bounds
+ * @param roomId - The room ID
+ * @param connections - Connections involving this room
+ * @param allRooms - All rooms (for dynamic overlap computation)
+ * @param wallThickness - Wall thickness (default 15cm)
+ * @param wallHeight - Wall height (default 280cm)
  */
+/**
+ * Checks if an edge has a wall segment at a specific position.
+ * Used to determine if corner extensions should be applied.
+ */
+function hasWallAtPosition(exclusions: EdgeExclusion[], position: number): boolean {
+  // If no exclusions, wall exists everywhere
+  if (exclusions.length === 0) return true
+
+  // Check if the position is NOT covered by any exclusion
+  for (const excl of exclusions) {
+    if (position >= excl.start && position < excl.end) {
+      return false  // Position is within an exclusion
+    }
+  }
+  return true  // Position is not excluded
+}
+
+/**
+ * Checks if a corner should have wall extension applied.
+ * Returns true if either:
+ * 1. A wall segment exists at that corner position, OR
+ * 2. An exclusion touches that corner (meaning a connecting room's wall exists there)
+ *
+ * This ensures proper T-junction formation when rooms connect at corners.
+ */
+function hasWallOrConnectionAtCorner(
+  exclusions: EdgeExclusion[],
+  position: number,
+  edgeLength: number
+): boolean {
+  // If no exclusions, wall exists everywhere
+  if (exclusions.length === 0) return true
+
+  // Check if any exclusion touches this corner position
+  // If so, a connecting room's wall exists there and we should extend
+  for (const excl of exclusions) {
+    if (position === 0 && excl.start === 0) return true  // Connection at start corner
+    if (position === edgeLength && excl.end === edgeLength) return true  // Connection at end corner
+  }
+
+  // Otherwise, check if position is NOT covered by any exclusion
+  for (const excl of exclusions) {
+    if (position >= excl.start && position < excl.end) {
+      return false  // Position is within an exclusion interior
+    }
+  }
+  return true
+}
+
 export function generateWallsFromBoundsWithConnections(
   bounds: RoomBounds,
   roomId: string,
   connections: RoomConnection[],
+  allRooms: Room[],
   wallThickness: number = 15,
   wallHeight: number = 280
 ): Omit<Wall, 'id'>[] {
   const { x, y, width, height } = bounds
   const halfT = wallThickness / 2
 
-  // Determine which edges need walls based on connections
-  const needsWall = getWallEdgesForRoom(roomId, bounds, connections)
-
-  // Wall centerlines are offset outward from room bounds by half wall thickness
-  const corners = [
-    { x: x - halfT, y: y - halfT }, // top-left
-    { x: x + width + halfT, y: y - halfT }, // top-right
-    { x: x + width + halfT, y: y + height + halfT }, // bottom-right
-    { x: x - halfT, y: y + height + halfT }, // bottom-left
-  ]
+  // Get exclusion zones for each edge (using dynamic computation)
+  const exclusions = getWallExclusionsForRoom(roomId, bounds, connections, allRooms)
 
   const defaultMaterial: MaterialRef = { materialId: 'white-paint' }
   const walls: Omit<Wall, 'id'>[] = []
 
-  // Top wall
-  if (needsWall.top) {
-    const connectionOpenings = getConnectionOpeningsForEdge(roomId, 'top', bounds, connections, wallHeight)
+  // Check which corners have perpendicular walls or connections
+  // Apply halfT corner extension if perpendicular wall exists OR a connection touches that corner
+  // This ensures proper T-junction formation when rooms connect at corners
+  const leftHasWallAtTop = hasWallOrConnectionAtCorner(exclusions.left, 0, height)
+  const leftHasWallAtBottom = hasWallOrConnectionAtCorner(exclusions.left, height, height)
+  const rightHasWallAtTop = hasWallOrConnectionAtCorner(exclusions.right, 0, height)
+  const rightHasWallAtBottom = hasWallOrConnectionAtCorner(exclusions.right, height, height)
+  const topHasWallAtLeft = hasWallOrConnectionAtCorner(exclusions.top, 0, width)
+  const topHasWallAtRight = hasWallOrConnectionAtCorner(exclusions.top, width, width)
+  const bottomHasWallAtLeft = hasWallOrConnectionAtCorner(exclusions.bottom, 0, width)
+  const bottomHasWallAtRight = hasWallOrConnectionAtCorner(exclusions.bottom, width, width)
+
+  // Generate top wall segments
+  // Top wall: horizontal, y = bounds.y - halfT, x goes from left to right
+  const topSegments = generateEdgeSegments(width, exclusions.top)
+  for (const segment of topSegments) {
+    // Calculate start offset:
+    // - At room corner (startsAtEdge): extend outward (-halfT) if perpendicular wall exists
+    // - At exclusion boundary (!startsAtEdge): extend inward (+halfT) to reach connecting room's wall
+    let startOffset = 0
+    if (segment.startsAtEdge) {
+      if (leftHasWallAtTop) startOffset = -halfT  // Room corner: extend outward (left)
+    } else {
+      startOffset = halfT  // Exclusion boundary: extend inward (right, toward gap)
+    }
+
+    // Calculate end offset:
+    // - At room corner (endsAtEdge): extend outward (+halfT) if perpendicular wall exists
+    // - At exclusion boundary (!endsAtEdge): extend inward (-halfT) to reach connecting room's wall
+    let endOffset = 0
+    if (segment.endsAtEdge) {
+      if (rightHasWallAtTop) endOffset = halfT  // Room corner: extend outward (right)
+    } else {
+      endOffset = -halfT  // Exclusion boundary: extend inward (left, toward gap)
+    }
+
     walls.push({
-      start: corners[0],
-      end: corners[1],
+      start: {
+        x: x + segment.start + startOffset,
+        y: y - halfT,
+      },
+      end: {
+        x: x + segment.end + endOffset,
+        y: y - halfT,
+      },
       thickness: wallThickness,
       height: wallHeight,
       material: defaultMaterial,
-      openings: connectionOpenings,
+      openings: [],
       ownerRoomId: roomId,
     })
   }
 
-  // Right wall
-  if (needsWall.right) {
-    const connectionOpenings = getConnectionOpeningsForEdge(roomId, 'right', bounds, connections, wallHeight)
+  // Generate right wall segments
+  // Right wall: vertical, x = bounds.x + width + halfT, y goes from top to bottom
+  const rightSegments = generateEdgeSegments(height, exclusions.right)
+  for (const segment of rightSegments) {
+    // Calculate start offset:
+    // - At room corner (startsAtEdge): extend outward (-halfT) if perpendicular wall exists
+    // - At exclusion boundary (!startsAtEdge): extend inward (+halfT) to reach connecting room's wall
+    let startOffset = 0
+    if (segment.startsAtEdge) {
+      if (topHasWallAtRight) startOffset = -halfT  // Room corner: extend outward (up)
+    } else {
+      startOffset = halfT  // Exclusion boundary: extend inward (down, toward gap)
+    }
+
+    // Calculate end offset:
+    // - At room corner (endsAtEdge): extend outward (+halfT) if perpendicular wall exists
+    // - At exclusion boundary (!endsAtEdge): extend inward (-halfT) to reach connecting room's wall
+    let endOffset = 0
+    if (segment.endsAtEdge) {
+      if (bottomHasWallAtRight) endOffset = halfT  // Room corner: extend outward (down)
+    } else {
+      endOffset = -halfT  // Exclusion boundary: extend inward (up, toward gap)
+    }
+
     walls.push({
-      start: corners[1],
-      end: corners[2],
+      start: {
+        x: x + width + halfT,
+        y: y + segment.start + startOffset,
+      },
+      end: {
+        x: x + width + halfT,
+        y: y + segment.end + endOffset,
+      },
       thickness: wallThickness,
       height: wallHeight,
       material: defaultMaterial,
-      openings: connectionOpenings,
+      openings: [],
       ownerRoomId: roomId,
     })
   }
 
-  // Bottom wall
-  if (needsWall.bottom) {
-    const connectionOpenings = getConnectionOpeningsForEdge(roomId, 'bottom', bounds, connections, wallHeight)
+  // Generate bottom wall segments
+  // Bottom wall: horizontal, y = bounds.y + height + halfT, x goes from left to right
+  const bottomSegments = generateEdgeSegments(width, exclusions.bottom)
+  for (const segment of bottomSegments) {
+    // Calculate start offset:
+    // - At room corner (startsAtEdge): extend outward (-halfT) if perpendicular wall exists
+    // - At exclusion boundary (!startsAtEdge): extend inward (+halfT) to reach connecting room's wall
+    let startOffset = 0
+    if (segment.startsAtEdge) {
+      if (leftHasWallAtBottom) startOffset = -halfT  // Room corner: extend outward (left)
+    } else {
+      startOffset = halfT  // Exclusion boundary: extend inward (right, toward gap)
+    }
+
+    // Calculate end offset:
+    // - At room corner (endsAtEdge): extend outward (+halfT) if perpendicular wall exists
+    // - At exclusion boundary (!endsAtEdge): extend inward (-halfT) to reach connecting room's wall
+    let endOffset = 0
+    if (segment.endsAtEdge) {
+      if (rightHasWallAtBottom) endOffset = halfT  // Room corner: extend outward (right)
+    } else {
+      endOffset = -halfT  // Exclusion boundary: extend inward (left, toward gap)
+    }
+
     walls.push({
-      start: corners[3],
-      end: corners[2],
+      start: {
+        x: x + segment.start + startOffset,
+        y: y + height + halfT,
+      },
+      end: {
+        x: x + segment.end + endOffset,
+        y: y + height + halfT,
+      },
       thickness: wallThickness,
       height: wallHeight,
       material: defaultMaterial,
-      openings: connectionOpenings,
+      openings: [],
       ownerRoomId: roomId,
     })
   }
 
-  // Left wall
-  if (needsWall.left) {
-    const connectionOpenings = getConnectionOpeningsForEdge(roomId, 'left', bounds, connections, wallHeight)
+  // Generate left wall segments
+  // Left wall: vertical, x = bounds.x - halfT, y goes from top to bottom
+  const leftSegments = generateEdgeSegments(height, exclusions.left)
+  for (const segment of leftSegments) {
+    // Calculate start offset:
+    // - At room corner (startsAtEdge): extend outward (-halfT) if perpendicular wall exists
+    // - At exclusion boundary (!startsAtEdge): extend inward (+halfT) to reach connecting room's wall
+    let startOffset = 0
+    if (segment.startsAtEdge) {
+      if (topHasWallAtLeft) startOffset = -halfT  // Room corner: extend outward (up)
+    } else {
+      startOffset = halfT  // Exclusion boundary: extend inward (down, toward gap)
+    }
+
+    // Calculate end offset:
+    // - At room corner (endsAtEdge): extend outward (+halfT) if perpendicular wall exists
+    // - At exclusion boundary (!endsAtEdge): extend inward (-halfT) to reach connecting room's wall
+    let endOffset = 0
+    if (segment.endsAtEdge) {
+      if (bottomHasWallAtLeft) endOffset = halfT  // Room corner: extend outward (down)
+    } else {
+      endOffset = -halfT  // Exclusion boundary: extend inward (up, toward gap)
+    }
+
     walls.push({
-      start: corners[0],
-      end: corners[3],
+      start: {
+        x: x - halfT,
+        y: y + segment.start + startOffset,
+      },
+      end: {
+        x: x - halfT,
+        y: y + segment.end + endOffset,
+      },
       thickness: wallThickness,
       height: wallHeight,
       material: defaultMaterial,
-      openings: connectionOpenings,
+      openings: [],
       ownerRoomId: roomId,
     })
   }
@@ -1196,11 +1446,10 @@ export interface ConnectionSnapResult {
   snapGuides: RoomSnapGuide[]
   connectionType: ConnectionSnapType
   adjacentRoomId: string | null
-  sharedEdge: {
-    start: Point2D
-    end: Point2D
-    proposedSide: 'top' | 'right' | 'bottom' | 'left'
-    adjacentSide: 'top' | 'right' | 'bottom' | 'left'
+  connectionInfo: {
+    axis: 'horizontal' | 'vertical'
+    proposedSide: RoomSide
+    adjacentSide: RoomSide
   } | null
 }
 
@@ -1208,6 +1457,9 @@ export interface ConnectionSnapResult {
  * Calculates room snapping with two modes:
  * 1. Direct connection (bounds touch) when rooms are very close
  * 2. Wall connection (gap between rooms) when rooms are moderately close
+ *
+ * Returns connection info with axis and roomSides (not coordinates) for creating
+ * connections that remain valid when rooms move.
  *
  * @param proposedBounds - The bounds of the room being moved/resized
  * @param existingRooms - All other rooms to check for snapping
@@ -1222,7 +1474,7 @@ export function calculateRoomSnapWithConnections(
   let snappedBounds = { ...proposedBounds }
   let connectionType: ConnectionSnapType = null
   let adjacentRoomId: string | null = null
-  let sharedEdge: ConnectionSnapResult['sharedEdge'] = null
+  let connectionInfo: ConnectionSnapResult['connectionInfo'] = null
 
   // Get edges of proposed room
   const proposedEdges = {
@@ -1265,19 +1517,18 @@ export function calculateRoomSnapWithConnections(
         bestDistance = topToBottomDist
 
         if (topToBottomDist <= SNAP_DIRECT_THRESHOLD) {
-          // Direct connection - snap to touch
+          // Direct connection - snap to touch (bounds touch exactly, no wall between)
           snapOffsetY = roomEdges.bottom - proposedEdges.top
           connectionType = 'direct'
         } else {
-          // Wall connection - snap with gap (no gap needed, walls are outside bounds)
-          snapOffsetY = roomEdges.bottom - proposedEdges.top
+          // Wall connection - snap with gap = wall thickness (single shared wall in gap)
+          snapOffsetY = roomEdges.bottom - proposedEdges.top + DEFAULT_WALL_THICKNESS
           connectionType = 'wall'
         }
 
         adjacentRoomId = room.id
-        sharedEdge = {
-          start: { x: horizontalOverlapStart, y: roomEdges.bottom },
-          end: { x: horizontalOverlapEnd, y: roomEdges.bottom },
+        connectionInfo = {
+          axis: 'horizontal',
           proposedSide: 'top',
           adjacentSide: 'bottom',
         }
@@ -1296,17 +1547,18 @@ export function calculateRoomSnapWithConnections(
         bestDistance = bottomToTopDist
 
         if (bottomToTopDist <= SNAP_DIRECT_THRESHOLD) {
+          // Direct connection - snap to touch
           snapOffsetY = roomEdges.top - proposedEdges.bottom
           connectionType = 'direct'
         } else {
-          snapOffsetY = roomEdges.top - proposedEdges.bottom
+          // Wall connection - snap with gap = wall thickness
+          snapOffsetY = roomEdges.top - proposedEdges.bottom - DEFAULT_WALL_THICKNESS
           connectionType = 'wall'
         }
 
         adjacentRoomId = room.id
-        sharedEdge = {
-          start: { x: horizontalOverlapStart, y: roomEdges.top },
-          end: { x: horizontalOverlapEnd, y: roomEdges.top },
+        connectionInfo = {
+          axis: 'horizontal',
           proposedSide: 'bottom',
           adjacentSide: 'top',
         }
@@ -1328,17 +1580,18 @@ export function calculateRoomSnapWithConnections(
         bestDistance = leftToRightDist
 
         if (leftToRightDist <= SNAP_DIRECT_THRESHOLD) {
+          // Direct connection - snap to touch
           snapOffsetX = roomEdges.right - proposedEdges.left
           connectionType = 'direct'
         } else {
-          snapOffsetX = roomEdges.right - proposedEdges.left
+          // Wall connection - snap with gap = wall thickness
+          snapOffsetX = roomEdges.right - proposedEdges.left + DEFAULT_WALL_THICKNESS
           connectionType = 'wall'
         }
 
         adjacentRoomId = room.id
-        sharedEdge = {
-          start: { x: roomEdges.right, y: verticalOverlapStart },
-          end: { x: roomEdges.right, y: verticalOverlapEnd },
+        connectionInfo = {
+          axis: 'vertical',
           proposedSide: 'left',
           adjacentSide: 'right',
         }
@@ -1357,17 +1610,18 @@ export function calculateRoomSnapWithConnections(
         bestDistance = rightToLeftDist
 
         if (rightToLeftDist <= SNAP_DIRECT_THRESHOLD) {
+          // Direct connection - snap to touch
           snapOffsetX = roomEdges.left - proposedEdges.right
           connectionType = 'direct'
         } else {
-          snapOffsetX = roomEdges.left - proposedEdges.right
+          // Wall connection - snap with gap = wall thickness
+          snapOffsetX = roomEdges.left - proposedEdges.right - DEFAULT_WALL_THICKNESS
           connectionType = 'wall'
         }
 
         adjacentRoomId = room.id
-        sharedEdge = {
-          start: { x: roomEdges.left, y: verticalOverlapStart },
-          end: { x: roomEdges.left, y: verticalOverlapEnd },
+        connectionInfo = {
+          axis: 'vertical',
           proposedSide: 'right',
           adjacentSide: 'left',
         }
@@ -1391,30 +1645,38 @@ export function calculateRoomSnapWithConnections(
     }
   }
 
-  return { snappedBounds, snapGuides, connectionType, adjacentRoomId, sharedEdge }
+  return { snappedBounds, snapGuides, connectionType, adjacentRoomId, connectionInfo }
 }
 
 /**
- * Finds all rooms that are adjacent to the given room (edges touching or within snap threshold).
+ * Information about an adjacent room connection.
+ */
+export interface AdjacentRoomInfo {
+  roomId: string
+  axis: 'horizontal' | 'vertical'
+  proposedSide: RoomSide
+  adjacentSide: RoomSide
+}
+
+/**
+ * Finds all rooms that are adjacent to the given room.
+ * Detects both direct connections (edges touch) and wall connections (edges have gap = wallThickness).
  * Used to detect and create room connections.
+ *
+ * Returns axis and roomSides (not coordinates) for connections that remain valid when rooms move.
+ *
+ * @param roomBounds - The bounds of the room to check adjacency for
+ * @param allRooms - All rooms to check against
+ * @param excludeRoomId - ID of the room being checked (to exclude from results)
+ * @param threshold - Tolerance for edge matching (default 1cm)
  */
 export function findAdjacentRooms(
   roomBounds: RoomBounds,
   allRooms: Room[],
   excludeRoomId: string,
   threshold: number = 1
-): Array<{
-  roomId: string
-  sharedEdge: { start: Point2D; end: Point2D }
-  proposedSide: 'top' | 'right' | 'bottom' | 'left'
-  adjacentSide: 'top' | 'right' | 'bottom' | 'left'
-}> {
-  const adjacent: Array<{
-    roomId: string
-    sharedEdge: { start: Point2D; end: Point2D }
-    proposedSide: 'top' | 'right' | 'bottom' | 'left'
-    adjacentSide: 'top' | 'right' | 'bottom' | 'left'
-  }> = []
+): AdjacentRoomInfo[] {
+  const adjacent: AdjacentRoomInfo[] = []
 
   const edges = {
     top: roomBounds.y,
@@ -1422,6 +1684,11 @@ export function findAdjacentRooms(
     left: roomBounds.x,
     right: roomBounds.x + roomBounds.width,
   }
+
+  // Maximum distance to consider as adjacent:
+  // - Direct connection: edges within threshold
+  // - Wall connection: edges within wallThickness + threshold
+  const maxAdjacentDistance = DEFAULT_WALL_THICKNESS + threshold
 
   for (const room of allRooms) {
     if (room.id === excludeRoomId) continue
@@ -1439,26 +1706,23 @@ export function findAdjacentRooms(
     const hasHorizontalOverlap = horizontalOverlapEnd - horizontalOverlapStart > threshold
 
     if (hasHorizontalOverlap) {
-      // Check if top edge touches other's bottom
-      if (Math.abs(edges.top - roomEdges.bottom) <= threshold) {
+      // Check if top edge touches or is near other's bottom
+      const topToBottomDist = edges.top - roomEdges.bottom
+      if (topToBottomDist >= 0 && topToBottomDist <= maxAdjacentDistance) {
         adjacent.push({
           roomId: room.id,
-          sharedEdge: {
-            start: { x: horizontalOverlapStart, y: edges.top },
-            end: { x: horizontalOverlapEnd, y: edges.top },
-          },
+          axis: 'horizontal',
           proposedSide: 'top',
           adjacentSide: 'bottom',
         })
       }
-      // Check if bottom edge touches other's top
-      if (Math.abs(edges.bottom - roomEdges.top) <= threshold) {
+
+      // Check if bottom edge touches or is near other's top
+      const bottomToTopDist = roomEdges.top - edges.bottom
+      if (bottomToTopDist >= 0 && bottomToTopDist <= maxAdjacentDistance) {
         adjacent.push({
           roomId: room.id,
-          sharedEdge: {
-            start: { x: horizontalOverlapStart, y: edges.bottom },
-            end: { x: horizontalOverlapEnd, y: edges.bottom },
-          },
+          axis: 'horizontal',
           proposedSide: 'bottom',
           adjacentSide: 'top',
         })
@@ -1471,26 +1735,23 @@ export function findAdjacentRooms(
     const hasVerticalOverlap = verticalOverlapEnd - verticalOverlapStart > threshold
 
     if (hasVerticalOverlap) {
-      // Check if left edge touches other's right
-      if (Math.abs(edges.left - roomEdges.right) <= threshold) {
+      // Check if left edge touches or is near other's right
+      const leftToRightDist = edges.left - roomEdges.right
+      if (leftToRightDist >= 0 && leftToRightDist <= maxAdjacentDistance) {
         adjacent.push({
           roomId: room.id,
-          sharedEdge: {
-            start: { x: edges.left, y: verticalOverlapStart },
-            end: { x: edges.left, y: verticalOverlapEnd },
-          },
+          axis: 'vertical',
           proposedSide: 'left',
           adjacentSide: 'right',
         })
       }
-      // Check if right edge touches other's left
-      if (Math.abs(edges.right - roomEdges.left) <= threshold) {
+
+      // Check if right edge touches or is near other's left
+      const rightToLeftDist = roomEdges.left - edges.right
+      if (rightToLeftDist >= 0 && rightToLeftDist <= maxAdjacentDistance) {
         adjacent.push({
           roomId: room.id,
-          sharedEdge: {
-            start: { x: edges.right, y: verticalOverlapStart },
-            end: { x: edges.right, y: verticalOverlapEnd },
-          },
+          axis: 'vertical',
           proposedSide: 'right',
           adjacentSide: 'left',
         })
