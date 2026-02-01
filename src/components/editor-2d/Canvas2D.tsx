@@ -634,6 +634,7 @@ export function Canvas2D() {
               isSelected={selectedIds.includes(room.id)}
               isHovered={hoveredId === room.id}
               scale={zoom2D}
+              isPanning={isPanning}
               onRegisterNode={handleRegisterNode}
               onUnregisterNode={handleUnregisterNode}
             />
@@ -707,6 +708,7 @@ export function Canvas2D() {
               key={f.id}
               id={f.id}
               scale={zoom2D}
+              isPanning={isPanning}
               onRegisterNode={handleRegisterNode}
               onUnregisterNode={handleUnregisterNode}
               onDragUpdate={handleFurnitureDragUpdate}

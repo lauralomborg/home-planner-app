@@ -10,6 +10,7 @@ import type { Point2D } from '@/models'
 interface FurnitureShapeProps {
   id: string
   scale: number
+  isPanning?: boolean
   onRegisterNode: (id: string, node: Konva.Rect) => void
   onUnregisterNode: (id: string) => void
   onDragUpdate: (isDragging: boolean, draggedIds: string[]) => void
@@ -18,6 +19,7 @@ interface FurnitureShapeProps {
 export const FurnitureShape = memo(function FurnitureShape({
   id,
   scale,
+  isPanning,
   onRegisterNode,
   onUnregisterNode,
   onDragUpdate,
@@ -114,7 +116,7 @@ export const FurnitureShape = memo(function FurnitureShape({
         stroke={isSelected ? COLORS_2D.wallSelected : isGrouped && !isInEditMode ? GROUP_COLORS.indicator : color}
         strokeWidth={isSelected ? 2 / scale : 1 / scale}
         cornerRadius={4}
-        draggable={!furniture.locked}
+        draggable={!furniture.locked && !isPanning}
         onClick={handleClick}
         onDblClick={handleDblClick}
         onMouseEnter={() => setHovered(furniture.id)}

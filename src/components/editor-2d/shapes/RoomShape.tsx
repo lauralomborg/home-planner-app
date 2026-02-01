@@ -12,6 +12,7 @@ interface RoomShapeProps {
   isSelected: boolean
   isHovered: boolean
   scale: number
+  isPanning?: boolean
   onRegisterNode: (id: string, node: Konva.Rect) => void
   onUnregisterNode: (id: string) => void
 }
@@ -21,6 +22,7 @@ export const RoomShape = memo(function RoomShape({
   isSelected,
   isHovered,
   scale,
+  isPanning,
   onRegisterNode,
   onUnregisterNode,
 }: RoomShapeProps) {
@@ -58,7 +60,7 @@ export const RoomShape = memo(function RoomShape({
         height={height}
         fill={fillColor}
         opacity={isSelected ? 0.5 : isHovered ? 0.4 : 0.3}
-        draggable={activeTool === 'select'}
+        draggable={activeTool === 'select' && !isPanning}
         onDragStart={() => setIsDragging(true)}
         onDragMove={(e) => {
           // Snap to 1cm grid using position() for instant snapping
