@@ -20,24 +20,36 @@ export const Grid = memo(function Grid({
 }: GridProps) {
   const lines = useMemo(() => {
     // Calculate adaptive grid size based on zoom
+    // GRID_SIZE = 1cm, we want minor lines at 1cm and major lines at 100cm (1m)
     let effectiveGridSize = GRID_SIZE
+    let majorInterval = 100 // Major line every 100cm (1m)
 
-    // When zoomed out, use larger grid cells
-    if (scale < 0.5) {
-      effectiveGridSize = GRID_SIZE * 4 // 2m grid
-    } else if (scale < 0.25) {
-      effectiveGridSize = GRID_SIZE * 8 // 4m grid
+    // When zoomed out, use larger grid cells to avoid too many lines
+    if (scale < 0.03) {
+      effectiveGridSize = GRID_SIZE * 1000 // 10m grid
+      majorInterval = 10 // Major every 100m
+    } else if (scale < 0.05) {
+      effectiveGridSize = GRID_SIZE * 500 // 5m grid
+      majorInterval = 10 // Major every 50m
     } else if (scale < 0.1) {
-      effectiveGridSize = GRID_SIZE * 20 // 10m grid
+      effectiveGridSize = GRID_SIZE * 100 // 1m grid
+      majorInterval = 10 // Major every 10m
+    } else if (scale < 0.25) {
+      effectiveGridSize = GRID_SIZE * 10 // 10cm grid
+      majorInterval = 10 // Major every 1m
+    } else if (scale < 0.5) {
+      effectiveGridSize = GRID_SIZE * 5 // 5cm grid
+      majorInterval = 20 // Major every 1m
     }
 
-    // Ensure we don't draw too many lines
-    const maxLines = 200
+    // Calculate visible area
     const visibleWidth = width / scale
     const visibleHeight = height / scale
     const numVerticalLines = Math.ceil(visibleWidth / effectiveGridSize)
     const numHorizontalLines = Math.ceil(visibleHeight / effectiveGridSize)
 
+    // Limit total lines to prevent performance issues
+    const maxLines = 500
     if (numVerticalLines > maxLines || numHorizontalLines > maxLines) {
       return null
     }
@@ -61,7 +73,8 @@ export const Grid = memo(function Grid({
 
     // Vertical lines
     for (let x = gridStartX; x <= worldEndX + effectiveGridSize; x += effectiveGridSize) {
-      const isMajor = Math.round(x / effectiveGridSize) % 5 === 0
+      const gridIndex = Math.round(x / effectiveGridSize)
+      const isMajor = gridIndex % majorInterval === 0
       result.push({
         key: `v-${i++}`,
         points: [x, gridStartY - effectiveGridSize, x, worldEndY + effectiveGridSize],
@@ -72,7 +85,8 @@ export const Grid = memo(function Grid({
 
     // Horizontal lines
     for (let y = gridStartY; y <= worldEndY + effectiveGridSize; y += effectiveGridSize) {
-      const isMajor = Math.round(y / effectiveGridSize) % 5 === 0
+      const gridIndex = Math.round(y / effectiveGridSize)
+      const isMajor = gridIndex % majorInterval === 0
       result.push({
         key: `h-${i++}`,
         points: [gridStartX - effectiveGridSize, y, worldEndX + effectiveGridSize, y],

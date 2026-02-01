@@ -242,11 +242,12 @@ export function Canvas2D() {
       } else if (activeTool === 'window') {
         const result = findWallAtPosition(worldPos)
         if (result) {
+          const windowWidth = 100
           addWindow({
             type: 'double',
             wallId: result.wall.id,
-            position: result.position,
-            width: 100,
+            position: result.position - windowWidth / 2,  // Center at cursor
+            width: windowWidth,
             height: DEFAULT_WINDOW_HEIGHT,
             elevationFromFloor: DEFAULT_WINDOW_ELEVATION,
             frameMaterial: { materialId: 'white-paint' },
@@ -256,11 +257,12 @@ export function Canvas2D() {
       } else if (activeTool === 'door') {
         const result = findWallAtPosition(worldPos)
         if (result) {
+          const doorWidth = 90
           addDoor({
             type: 'single',
             wallId: result.wall.id,
-            position: result.position,
-            width: 90,
+            position: result.position - doorWidth / 2,  // Center at cursor
+            width: doorWidth,
             height: DEFAULT_DOOR_HEIGHT,
             openDirection: 'right',
             material: { materialId: 'wood-oak' },
@@ -273,7 +275,10 @@ export function Canvas2D() {
         if (catalogItem) {
           addFurniture({
             catalogItemId: selectedFurnitureId,
-            position: snappedPos,
+            position: {
+              x: snappedPos.x - catalogItem.defaultDimensions.width / 2,
+              y: snappedPos.y - catalogItem.defaultDimensions.depth / 2,
+            },
             rotation: 0,
             dimensions: { ...catalogItem.defaultDimensions },
             partMaterials: {},
@@ -454,7 +459,7 @@ export function Canvas2D() {
 
       const scaleBy = 1.08
       const newScale = e.evt.deltaY < 0 ? zoom2D * scaleBy : zoom2D / scaleBy
-      const clampedScale = Math.min(Math.max(newScale, 0.02), 5)
+      const clampedScale = Math.min(Math.max(newScale, 0.02), 20)
 
       const mousePointTo = { x: (pointer.x - pan2D.x) / zoom2D, y: (pointer.y - pan2D.y) / zoom2D }
       const newPos = { x: pointer.x - mousePointTo.x * clampedScale, y: pointer.y - mousePointTo.y * clampedScale }

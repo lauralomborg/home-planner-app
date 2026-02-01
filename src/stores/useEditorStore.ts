@@ -114,8 +114,8 @@ interface EditorState {
 }
 
 const DEFAULT_ZOOM = 1
-const MIN_ZOOM = 0.1
-const MAX_ZOOM = 5
+const MIN_ZOOM = 0.02
+const MAX_ZOOM = 20
 
 export const useEditorStore = create<EditorState>()(
   immer((set) => ({

@@ -29,12 +29,13 @@ export const FurnitureShape = memo(function FurnitureShape({
   const { select, addToSelection, toggleSelection, setHovered, setIsDragging, enterGroupEdit } = useEditorStore()
   const selectedIds = useEditorStore((state) => state.selectedIds)
   const editingGroupId = useEditorStore((state) => state.editingGroupId)
-  const { moveFurniture, moveMultipleFurniture, duplicateMultiple, resizeFurniture, rotateFurniture, getGroupForItem, getGroupMembers, finishFurnitureMove } = useFloorPlanStore()
+  const { moveFurniture, duplicateMultiple, resizeFurniture, rotateFurniture, getGroupForItem, getGroupMembers, finishFurnitureMove, getFurnitureById } = useFloorPlanStore()
   const isSelected = useEditorStore((state) => state.selectedIds.includes(id))
   const isHovered = useEditorStore((state) => state.hoveredId === id)
 
   // Track drag start position for multi-select drag
   const dragStartPos = useRef<Point2D | null>(null)
+  const originalPositionsRef = useRef<Map<string, Point2D>>(new Map())
   const didAltDuplicate = useRef(false)
   const draggedIdsRef = useRef<string[]>([])
 
@@ -122,6 +123,7 @@ export const FurnitureShape = memo(function FurnitureShape({
           setIsDragging(true)
           dragStartPos.current = { x: furniture.position.x, y: furniture.position.y }
           didAltDuplicate.current = false
+          originalPositionsRef.current.clear()
 
           // Determine what items we're dragging
           let dragIds = [id]
@@ -142,6 +144,14 @@ export const FurnitureShape = memo(function FurnitureShape({
             didAltDuplicate.current = true
           }
 
+          // Save original positions for ALL dragged items (for stable multi-select drag)
+          for (const itemId of dragIds) {
+            const item = getFurnitureById(itemId)
+            if (item) {
+              originalPositionsRef.current.set(itemId, { ...item.position })
+            }
+          }
+
           draggedIdsRef.current = dragIds
           onDragUpdate(true, dragIds)
         }}
@@ -154,19 +164,23 @@ export const FurnitureShape = memo(function FurnitureShape({
 
           const newPos = { x: snappedX, y: snappedY }
 
-          // If this item is selected and there are multiple selected, move all
+          // If this item is selected and there are multiple selected, move all using absolute positions
           if (isSelected && selectedIds.length > 1 && dragStartPos.current) {
-            const delta = {
+            // Calculate total delta from original drag start (not incremental)
+            const totalDelta = {
               x: newPos.x - dragStartPos.current.x,
               y: newPos.y - dragStartPos.current.y,
             }
-            // Move all other selected items by the delta
-            const otherIds = selectedIds.filter((sid) => sid !== id)
-            moveMultipleFurniture(otherIds, delta)
-            // Update this item
-            moveFurniture(id, newPos)
-            // Update drag start position for next move
-            dragStartPos.current = newPos
+            // Move all items by applying totalDelta to their original positions
+            for (const itemId of selectedIds) {
+              const originalPos = originalPositionsRef.current.get(itemId)
+              if (originalPos) {
+                moveFurniture(itemId, {
+                  x: originalPos.x + totalDelta.x,
+                  y: originalPos.y + totalDelta.y,
+                })
+              }
+            }
           } else {
             moveFurniture(id, newPos)
           }
@@ -178,6 +192,7 @@ export const FurnitureShape = memo(function FurnitureShape({
             finishFurnitureMove(draggedIdsRef.current)
           }
           dragStartPos.current = null
+          originalPositionsRef.current.clear()
           didAltDuplicate.current = false
           draggedIdsRef.current = []
           onDragUpdate(false, [])
