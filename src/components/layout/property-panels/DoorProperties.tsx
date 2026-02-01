@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -22,8 +23,22 @@ const OPEN_DIRECTIONS = [
 ] as const
 
 export function DoorProperties({ door }: { door: DoorInstance }) {
-  const { updateDoor, removeDoor } = useFloorPlanStore()
+  const { updateDoor, removeDoor, getWallById } = useFloorPlanStore()
   const clearSelection = useEditorStore((state) => state.clearSelection)
+
+  // Calculate wall length for bounds validation
+  const wallLength = useMemo(() => {
+    const wall = getWallById(door.wallId)
+    if (!wall) return 0
+    const dx = wall.end.x - wall.start.x
+    const dy = wall.end.y - wall.start.y
+    return Math.sqrt(dx * dx + dy * dy)
+  }, [getWallById, door.wallId])
+
+  // Calculate max position (left-edge based: position + width <= wallLength)
+  const maxPosition = Math.max(0, wallLength - door.width)
+  // Calculate max width (can't exceed wall length, also limited by current position)
+  const maxWidth = Math.max(40, wallLength - door.position)
 
   const handleDelete = () => {
     removeDoor(door.id)
@@ -39,6 +54,8 @@ export function DoorProperties({ door }: { door: DoorInstance }) {
             value={Math.round(door.position)}
             onChange={(e) => updateDoor(door.id, { position: Number(e.target.value) })}
             className="h-8 text-sm"
+            min={0}
+            max={Math.round(maxPosition)}
           />
         </PropertyRow>
       </PropertySection>
@@ -57,7 +74,7 @@ export function DoorProperties({ door }: { door: DoorInstance }) {
               }
               className="h-8 text-sm"
               min={40}
-              max={200}
+              max={Math.min(200, Math.round(maxWidth))}
             />
           </div>
           <div className="space-y-1">

@@ -35,7 +35,7 @@ export const Door3D = memo(function Door3D({ door, wall, isSelected }: Door3DPro
     const doorWidth = door.width / 100
     const doorHeight = door.height / 100
     const frameThickness = 0.06 // 6cm frame
-    const frameDepth = wall.thickness / 100 + 0.02
+    const frameDepth = wall.thickness / 100 // Match wall thickness
     const panelThickness = 0.04 // 4cm door panel
     const handleSize = 0.03
 

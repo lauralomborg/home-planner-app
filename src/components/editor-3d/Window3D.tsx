@@ -27,7 +27,7 @@ export const Window3D = memo(function Window3D({ window: windowInstance, wall, i
     const windowWidth = windowInstance.width / 100
     const windowHeight = windowInstance.height / 100
     const frameThickness = 0.05 // 5cm frame
-    const frameDepth = wall.thickness / 100 + 0.02 // Slightly thicker than wall
+    const frameDepth = wall.thickness / 100 // Match wall thickness
 
     // Calculate wall properties
     const dx = wall.end.x - wall.start.x

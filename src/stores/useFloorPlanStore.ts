@@ -28,6 +28,26 @@ import {
   WALL_CONNECTION_TOLERANCE,
 } from '@/services/geometry'
 
+// Helper function to calculate wall length
+function getWallLength(wall: Wall): number {
+  const dx = wall.end.x - wall.start.x
+  const dy = wall.end.y - wall.start.y
+  return Math.sqrt(dx * dx + dy * dy)
+}
+
+// Helper function to constrain window/door position and width to wall bounds
+function constrainOpeningToWall(
+  position: number,
+  width: number,
+  wallLength: number
+): { position: number; width: number } {
+  // Width can't exceed wall length
+  const clampedWidth = Math.min(width, wallLength)
+  // Position must keep opening within wall bounds (left-edge based positioning)
+  const clampedPosition = Math.max(0, Math.min(position, wallLength - clampedWidth))
+  return { position: clampedPosition, width: clampedWidth }
+}
+
 interface FloorPlanState {
   floorPlan: FloorPlan
 
@@ -587,13 +607,11 @@ export const useFloorPlanStore = create<FloorPlanState>()(
             // Find new wall and clamp position if needed
             const newWall = state.floorPlan.walls.find((w) => w.id === newWallId)
             if (newWall) {
-              const dx = newWall.end.x - newWall.start.x
-              const dy = newWall.end.y - newWall.start.y
-              const wallLength = Math.sqrt(dx * dx + dy * dy)
-              // Clamp position to stay within wall bounds
-              const minPos = window.width / 2
-              const maxPos = wallLength - window.width / 2
-              window.position = Math.max(minPos, Math.min(maxPos, window.position))
+              const wallLength = getWallLength(newWall)
+              // Use left-edge based clamping
+              const constrained = constrainOpeningToWall(window.position, window.width, wallLength)
+              window.position = constrained.position
+              window.width = constrained.width
               // Add opening to the new wall
               newWall.openings.push({
                 id: crypto.randomUUID(),
@@ -616,13 +634,11 @@ export const useFloorPlanStore = create<FloorPlanState>()(
             // Find new wall and clamp position if needed
             const newWall = state.floorPlan.walls.find((w) => w.id === newWallId)
             if (newWall) {
-              const dx = newWall.end.x - newWall.start.x
-              const dy = newWall.end.y - newWall.start.y
-              const wallLength = Math.sqrt(dx * dx + dy * dy)
-              // Clamp position to stay within wall bounds
-              const minPos = door.width / 2
-              const maxPos = wallLength - door.width / 2
-              door.position = Math.max(minPos, Math.min(maxPos, door.position))
+              const wallLength = getWallLength(newWall)
+              // Use left-edge based clamping
+              const constrained = constrainOpeningToWall(door.position, door.width, wallLength)
+              door.position = constrained.position
+              door.width = constrained.width
               // Add opening to the new wall
               newWall.openings.push({
                 id: crypto.randomUUID(),
@@ -823,18 +839,31 @@ export const useFloorPlanStore = create<FloorPlanState>()(
     addWindow: (window) => {
       const id = crypto.randomUUID()
       set((state) => {
+        // Find the wall and constrain position/width
+        const wall = state.floorPlan.walls.find((w) => w.id === window.wallId)
+        let position = window.position
+        let width = window.width
+
+        if (wall) {
+          const wallLength = getWallLength(wall)
+          const constrained = constrainOpeningToWall(position, width, wallLength)
+          position = constrained.position
+          width = constrained.width
+        }
+
         state.floorPlan.windows.push({
           ...window,
           id,
+          position,
+          width,
         })
         // Add opening to the wall
-        const wall = state.floorPlan.walls.find((w) => w.id === window.wallId)
         if (wall) {
           wall.openings.push({
             id: crypto.randomUUID(),
             type: 'window',
-            position: window.position,
-            width: window.width,
+            position,
+            width,
             height: window.height,
             elevationFromFloor: window.elevationFromFloor,
             referenceId: id,
@@ -853,6 +882,19 @@ export const useFloorPlanStore = create<FloorPlanState>()(
         const newWallId = updates.wallId ?? oldWallId
         const isWallChange = newWallId !== oldWallId
 
+        // Get the target wall and constrain position/width
+        const targetWall = state.floorPlan.walls.find((w) => w.id === newWallId)
+        let constrainedUpdates = { ...updates }
+
+        if (targetWall) {
+          const wallLength = getWallLength(targetWall)
+          const newPosition = updates.position ?? window.position
+          const newWidth = updates.width ?? window.width
+          const constrained = constrainOpeningToWall(newPosition, newWidth, wallLength)
+          constrainedUpdates.position = constrained.position
+          constrainedUpdates.width = constrained.width
+        }
+
         // If wall is changing, handle the transfer
         if (isWallChange) {
           // Remove opening from old wall
@@ -862,22 +904,21 @@ export const useFloorPlanStore = create<FloorPlanState>()(
           }
 
           // Add opening to new wall
-          const newWall = state.floorPlan.walls.find((w) => w.id === newWallId)
-          if (newWall) {
-            newWall.openings.push({
+          if (targetWall) {
+            targetWall.openings.push({
               id: crypto.randomUUID(),
               type: 'window',
-              position: updates.position ?? window.position,
-              width: updates.width ?? window.width,
-              height: updates.height ?? window.height,
-              elevationFromFloor: updates.elevationFromFloor ?? window.elevationFromFloor,
+              position: constrainedUpdates.position ?? window.position,
+              width: constrainedUpdates.width ?? window.width,
+              height: constrainedUpdates.height ?? window.height,
+              elevationFromFloor: constrainedUpdates.elevationFromFloor ?? window.elevationFromFloor,
               referenceId: id,
             })
           }
         }
 
-        // Apply updates to window
-        Object.assign(window, updates)
+        // Apply constrained updates to window
+        Object.assign(window, constrainedUpdates)
 
         // Update corresponding wall opening (only if wall didn't change)
         if (!isWallChange) {
@@ -885,12 +926,12 @@ export const useFloorPlanStore = create<FloorPlanState>()(
           if (wall) {
             const opening = wall.openings.find((o) => o.referenceId === id)
             if (opening) {
-              if (updates.position !== undefined)
-                opening.position = updates.position
-              if (updates.width !== undefined) opening.width = updates.width
-              if (updates.height !== undefined) opening.height = updates.height
-              if (updates.elevationFromFloor !== undefined)
-                opening.elevationFromFloor = updates.elevationFromFloor
+              if (constrainedUpdates.position !== undefined)
+                opening.position = constrainedUpdates.position
+              if (constrainedUpdates.width !== undefined) opening.width = constrainedUpdates.width
+              if (constrainedUpdates.height !== undefined) opening.height = constrainedUpdates.height
+              if (constrainedUpdates.elevationFromFloor !== undefined)
+                opening.elevationFromFloor = constrainedUpdates.elevationFromFloor
             }
           }
         }
@@ -920,18 +961,31 @@ export const useFloorPlanStore = create<FloorPlanState>()(
     addDoor: (door) => {
       const id = crypto.randomUUID()
       set((state) => {
+        // Find the wall and constrain position/width
+        const wall = state.floorPlan.walls.find((w) => w.id === door.wallId)
+        let position = door.position
+        let width = door.width
+
+        if (wall) {
+          const wallLength = getWallLength(wall)
+          const constrained = constrainOpeningToWall(position, width, wallLength)
+          position = constrained.position
+          width = constrained.width
+        }
+
         state.floorPlan.doors.push({
           ...door,
           id,
+          position,
+          width,
         })
         // Add opening to the wall
-        const wall = state.floorPlan.walls.find((w) => w.id === door.wallId)
         if (wall) {
           wall.openings.push({
             id: crypto.randomUUID(),
             type: 'door',
-            position: door.position,
-            width: door.width,
+            position,
+            width,
             height: door.height,
             elevationFromFloor: 0,
             referenceId: id,
@@ -950,6 +1004,19 @@ export const useFloorPlanStore = create<FloorPlanState>()(
         const newWallId = updates.wallId ?? oldWallId
         const isWallChange = newWallId !== oldWallId
 
+        // Get the target wall and constrain position/width
+        const targetWall = state.floorPlan.walls.find((w) => w.id === newWallId)
+        let constrainedUpdates = { ...updates }
+
+        if (targetWall) {
+          const wallLength = getWallLength(targetWall)
+          const newPosition = updates.position ?? door.position
+          const newWidth = updates.width ?? door.width
+          const constrained = constrainOpeningToWall(newPosition, newWidth, wallLength)
+          constrainedUpdates.position = constrained.position
+          constrainedUpdates.width = constrained.width
+        }
+
         // If wall is changing, handle the transfer
         if (isWallChange) {
           // Remove opening from old wall
@@ -959,22 +1026,21 @@ export const useFloorPlanStore = create<FloorPlanState>()(
           }
 
           // Add opening to new wall
-          const newWall = state.floorPlan.walls.find((w) => w.id === newWallId)
-          if (newWall) {
-            newWall.openings.push({
+          if (targetWall) {
+            targetWall.openings.push({
               id: crypto.randomUUID(),
               type: 'door',
-              position: updates.position ?? door.position,
-              width: updates.width ?? door.width,
-              height: updates.height ?? door.height,
+              position: constrainedUpdates.position ?? door.position,
+              width: constrainedUpdates.width ?? door.width,
+              height: constrainedUpdates.height ?? door.height,
               elevationFromFloor: 0,
               referenceId: id,
             })
           }
         }
 
-        // Apply updates to door
-        Object.assign(door, updates)
+        // Apply constrained updates to door
+        Object.assign(door, constrainedUpdates)
 
         // Update corresponding wall opening (only if wall didn't change)
         if (!isWallChange) {
@@ -982,10 +1048,10 @@ export const useFloorPlanStore = create<FloorPlanState>()(
           if (wall) {
             const opening = wall.openings.find((o) => o.referenceId === id)
             if (opening) {
-              if (updates.position !== undefined)
-                opening.position = updates.position
-              if (updates.width !== undefined) opening.width = updates.width
-              if (updates.height !== undefined) opening.height = updates.height
+              if (constrainedUpdates.position !== undefined)
+                opening.position = constrainedUpdates.position
+              if (constrainedUpdates.width !== undefined) opening.width = constrainedUpdates.width
+              if (constrainedUpdates.height !== undefined) opening.height = constrainedUpdates.height
             }
           }
         }

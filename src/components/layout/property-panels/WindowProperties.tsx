@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -15,8 +16,22 @@ const WINDOW_TYPES: { value: WindowType; label: string }[] = [
 ]
 
 export function WindowProperties({ window }: { window: WindowInstance }) {
-  const { updateWindow, removeWindow } = useFloorPlanStore()
+  const { updateWindow, removeWindow, getWallById } = useFloorPlanStore()
   const clearSelection = useEditorStore((state) => state.clearSelection)
+
+  // Calculate wall length for bounds validation
+  const wallLength = useMemo(() => {
+    const wall = getWallById(window.wallId)
+    if (!wall) return 0
+    const dx = wall.end.x - wall.start.x
+    const dy = wall.end.y - wall.start.y
+    return Math.sqrt(dx * dx + dy * dy)
+  }, [getWallById, window.wallId])
+
+  // Calculate max position (left-edge based: position + width <= wallLength)
+  const maxPosition = Math.max(0, wallLength - window.width)
+  // Calculate max width (can't exceed wall length, also limited by current position)
+  const maxWidth = Math.max(30, wallLength - window.position)
 
   const handleDelete = () => {
     removeWindow(window.id)
@@ -32,6 +47,8 @@ export function WindowProperties({ window }: { window: WindowInstance }) {
             value={Math.round(window.position)}
             onChange={(e) => updateWindow(window.id, { position: Number(e.target.value) })}
             className="h-8 text-sm"
+            min={0}
+            max={Math.round(maxPosition)}
           />
         </PropertyRow>
         <PropertyRow label="Height from floor">
@@ -62,7 +79,7 @@ export function WindowProperties({ window }: { window: WindowInstance }) {
               }
               className="h-8 text-sm"
               min={30}
-              max={300}
+              max={Math.min(300, Math.round(maxWidth))}
             />
           </div>
           <div className="space-y-1">

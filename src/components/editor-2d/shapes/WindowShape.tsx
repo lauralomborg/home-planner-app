@@ -42,7 +42,7 @@ export const WindowShape = memo(function WindowShape({
   const wallAngle = Math.atan2(dy, dx)
 
   const windowWidth = window.width
-  const thickness = wall.thickness + 4
+  const thickness = wall.thickness
 
   // Position is left edge, but Group needs to be at center for rotation
   // Calculate center by adding half-width along the wall direction
