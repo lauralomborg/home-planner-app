@@ -1,15 +1,8 @@
 import { memo, useMemo } from 'react'
 import * as THREE from 'three'
 import type { DoorInstance, Wall } from '@/models'
-
-// Nordic color palette
-const COLORS = {
-  frame: '#D4C4B0',
-  frameSelected: '#5B8A72',
-  panel: '#B8A082',
-  panelSelected: '#4A7A62',
-  handle: '#8B7355',
-}
+import { calculatePositionOnWall } from '@/services/geometry'
+import { COLORS_3D, NORDIC_COLORS, COLORS_FURNITURE } from '@/constants/colors'
 
 interface Door3DProps {
   door: DoorInstance
@@ -39,11 +32,8 @@ export const Door3D = memo(function Door3D({ door, wall, isSelected }: Door3DPro
     isSlidingDoor,
     hingeOnLeft,
   } = useMemo(() => {
-    // Calculate wall properties
-    const dx = wall.end.x - wall.start.x
-    const dy = wall.end.y - wall.start.y
-    const wallLength = Math.sqrt(dx * dx + dy * dy)
-    const wallAngle = Math.atan2(dy, dx)
+    // Calculate wall position using shared utility
+    const { centerX, centerY, wallAngle } = calculatePositionOnWall(wall, door.position)
 
     // Door dimensions in meters
     const doorWidth = door.width / 100
@@ -53,12 +43,9 @@ export const Door3D = memo(function Door3D({ door, wall, isSelected }: Door3DPro
     const panelThickness = 0.04 // 4cm door panel
     const handleSize = 0.03
 
-    // Position along wall (normalized 0-1) - position is already the center
-    const positionAlongWall = door.position / wallLength
-
-    // Calculate 3D position
-    const doorCenterX = (wall.start.x + dx * positionAlongWall) / 100
-    const doorCenterZ = (wall.start.y + dy * positionAlongWall) / 100
+    // Calculate 3D position (convert cm to meters)
+    const doorCenterX = centerX / 100
+    const doorCenterZ = centerY / 100
     const doorCenterY = doorHeight / 2 // Doors start at floor level
 
     // Door open angle in radians
@@ -99,8 +86,8 @@ export const Door3D = memo(function Door3D({ door, wall, isSelected }: Door3DPro
     }
   }, [door, wall])
 
-  const frameColor = isSelected ? COLORS.frameSelected : door.material.colorOverride || COLORS.frame
-  const panelColor = isSelected ? COLORS.panelSelected : COLORS.panel
+  const frameColor = isSelected ? NORDIC_COLORS.wallSelected : door.material.colorOverride || COLORS_3D.doorFrame
+  const panelColor = isSelected ? '#4A7A62' : COLORS_3D.doorPanel
 
   return (
     <group
@@ -161,7 +148,7 @@ export const Door3D = memo(function Door3D({ door, wall, isSelected }: Door3DPro
               {/* Left door handle */}
               <mesh position={[panelWidth - 0.06, 0, panelThickness / 2 + handleSize / 2]} castShadow>
                 <boxGeometry args={[0.02, 0.12, handleSize]} />
-                <meshStandardMaterial color={COLORS.handle} roughness={0.3} metalness={0.5} />
+                <meshStandardMaterial color={COLORS_FURNITURE.woodDark} roughness={0.3} metalness={0.5} />
               </mesh>
             </group>
           </group>
@@ -175,7 +162,7 @@ export const Door3D = memo(function Door3D({ door, wall, isSelected }: Door3DPro
               {/* Right door handle */}
               <mesh position={[-panelWidth + 0.06, 0, panelThickness / 2 + handleSize / 2]} castShadow>
                 <boxGeometry args={[0.02, 0.12, handleSize]} />
-                <meshStandardMaterial color={COLORS.handle} roughness={0.3} metalness={0.5} />
+                <meshStandardMaterial color={COLORS_FURNITURE.woodDark} roughness={0.3} metalness={0.5} />
               </mesh>
             </group>
           </group>
@@ -201,7 +188,7 @@ export const Door3D = memo(function Door3D({ door, wall, isSelected }: Door3DPro
               castShadow
             >
               <boxGeometry args={[0.02, 0.12, handleSize]} />
-              <meshStandardMaterial color={COLORS.handle} roughness={0.3} metalness={0.5} />
+              <meshStandardMaterial color={COLORS_FURNITURE.woodDark} roughness={0.3} metalness={0.5} />
             </mesh>
           </group>
         </group>

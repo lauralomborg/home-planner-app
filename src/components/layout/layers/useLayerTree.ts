@@ -74,10 +74,8 @@ export function useLayerTree() {
       }
     }
 
-    // Build room nodes (sorted by zIndex descending - higher zIndex = on top = first in list)
-    const sortedRooms = [...rooms].sort((a, b) => (b.zIndex ?? 0) - (a.zIndex ?? 0))
-
-    for (const room of sortedRooms) {
+    // Helper to build room node with its children (including nested rooms)
+    const buildRoomNode = (room: Room, depth: number, parentId: string | null): LayerNode => {
       // Groups directly in this room (not nested in another group)
       const roomGroups = groups
         .filter((g) => g.parentRoomId === room.id && !g.parentGroupId)
@@ -88,32 +86,50 @@ export function useLayerTree() {
         .filter((f) => f.parentRoomId === room.id && !f.parentGroupId)
         .sort((a, b) => (b.zIndex ?? 0) - (a.zIndex ?? 0))
 
+      // Child rooms (rooms with this room as parent)
+      const childRooms = rooms
+        .filter((r) => r.parentRoomId === room.id)
+        .sort((a, b) => (b.zIndex ?? 0) - (a.zIndex ?? 0))
+
       const children: LayerNode[] = [
-        ...roomGroups.map((g) => buildGroupNode(g, 1, room.id)),
+        // Nested rooms first
+        ...childRooms.map((r) => buildRoomNode(r, depth + 1, room.id)),
+        // Then groups
+        ...roomGroups.map((g) => buildGroupNode(g, depth + 1, room.id)),
+        // Then furniture
         ...roomFurniture.map((f) => ({
           id: f.id,
           type: 'furniture' as const,
           name: getFurnitureName(f),
           locked: f.locked,
           zIndex: f.zIndex ?? 0,
-          depth: 1,
+          depth: depth + 1,
           parentId: room.id,
           children: [],
           data: f,
         })),
       ]
 
-      nodes.push({
+      return {
         id: room.id,
         type: 'room',
         name: room.name,
         locked: false, // Rooms don't have a locked property currently
         zIndex: room.zIndex ?? 0,
-        depth: 0,
-        parentId: null,
+        depth,
+        parentId,
         children,
         data: room,
-      })
+      }
+    }
+
+    // Only render root-level rooms (no parentRoomId) at depth 0
+    const rootRooms = rooms
+      .filter((r) => !r.parentRoomId)
+      .sort((a, b) => (b.zIndex ?? 0) - (a.zIndex ?? 0))
+
+    for (const room of rootRooms) {
+      nodes.push(buildRoomNode(room, 0, null))
     }
 
     // Root-level groups (no parent room or group)

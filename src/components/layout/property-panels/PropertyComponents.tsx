@@ -1,4 +1,15 @@
 import type { ReactNode } from 'react'
+import { Trash2 } from 'lucide-react'
+import { Input } from '@/components/ui/input'
+import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
+
+// Consistent spacing values
+export const PROPERTY_SPACING = {
+  sectionGap: 'space-y-6',
+  itemGap: 'space-y-3',
+  gridGap: 'gap-2',
+}
 
 export function PropertyRow({
   label,
@@ -31,5 +42,57 @@ export function PropertySection({
       </h4>
       <div className="space-y-3">{children}</div>
     </div>
+  )
+}
+
+interface PropertyInputProps {
+  type?: 'text' | 'number'
+  value: string | number
+  onChange: (value: string) => void
+  min?: number
+  max?: number
+  step?: number
+  className?: string
+}
+
+export function PropertyInput({
+  type = 'text',
+  value,
+  onChange,
+  min,
+  max,
+  step,
+  className,
+}: PropertyInputProps) {
+  return (
+    <Input
+      type={type}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      min={min}
+      max={max}
+      step={step}
+      className={cn('h-8 text-sm', className)}
+    />
+  )
+}
+
+interface DeleteButtonProps {
+  onClick: () => void
+  label?: string
+}
+
+export function DeleteButton({ onClick, label = 'Delete' }: DeleteButtonProps) {
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={onClick}
+      className="w-full justify-start gap-2 text-destructive hover:text-destructive hover:bg-destructive/10 border-destructive/20"
+    >
+      <Trash2 className="w-4 h-4" />
+      {label}
+      <span className="ml-auto text-[10px] font-medium opacity-60"></span>
+    </Button>
   )
 }

@@ -311,8 +311,6 @@ export type EditorTool =
   | 'furniture'
   | 'window'
   | 'door'
-  | 'light'
-  | 'measure'
   | 'pan'
   | 'erase'
 

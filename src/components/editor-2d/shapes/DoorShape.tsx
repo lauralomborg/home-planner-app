@@ -4,6 +4,7 @@ import type { KonvaEventObject } from 'konva/lib/Node'
 import { useEditorStore, useFloorPlanStore } from '@/stores'
 import { COLORS_2D } from '@/constants/colors'
 import { handleSelectWithModifiers } from '../types'
+import { calculatePositionOnWall } from '@/services/geometry'
 import type { DoorInstance, Wall } from '@/models'
 
 interface DoorShapeProps {
@@ -22,14 +23,10 @@ export const DoorShape = memo(function DoorShape({
   const { select, addToSelection, toggleSelection, setHovered, setIsDragging } = useEditorStore()
   const { updateDoor } = useFloorPlanStore()
 
+  // Calculate door position on wall
+  const { centerX, centerY, wallAngle, wallLength } = calculatePositionOnWall(wall, door.position)
   const dx = wall.end.x - wall.start.x
   const dy = wall.end.y - wall.start.y
-  const wallLength = Math.sqrt(dx * dx + dy * dy)
-  const angle = Math.atan2(dy, dx)
-
-  const t = door.position / wallLength
-  const centerX = wall.start.x + dx * t
-  const centerY = wall.start.y + dy * t
 
   const doorWidth = door.width
   const thickness = wall.thickness + 4
@@ -67,7 +64,7 @@ export const DoorShape = memo(function DoorShape({
     <Group
       x={centerX}
       y={centerY}
-      rotation={angle * (180 / Math.PI)}
+      rotation={wallAngle * (180 / Math.PI)}
       draggable
       onClick={(e) => handleSelectWithModifiers(e, door.id, select, addToSelection, toggleSelection)}
       onDragStart={() => setIsDragging(true)}

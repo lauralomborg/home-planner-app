@@ -1,13 +1,8 @@
 import { memo, useMemo } from 'react'
 import * as THREE from 'three'
 import type { WindowInstance, Wall } from '@/models'
-
-// Nordic color palette
-const COLORS = {
-  frame: '#E8E0D5',
-  frameSelected: '#5B8A72',
-  glass: '#87CEEB',
-}
+import { calculatePositionOnWall } from '@/services/geometry'
+import { COLORS_3D, NORDIC_COLORS } from '@/constants/colors'
 
 interface Window3DProps {
   window: WindowInstance
@@ -29,11 +24,8 @@ export const Window3D = memo(function Window3D({ window: windowInstance, wall, i
     hasCenterDivider,
     hasSlidingDivider,
   } = useMemo(() => {
-    // Calculate wall properties
-    const dx = wall.end.x - wall.start.x
-    const dy = wall.end.y - wall.start.y
-    const wallLength = Math.sqrt(dx * dx + dy * dy)
-    const wallAngle = Math.atan2(dy, dx)
+    // Calculate wall position using shared utility
+    const { centerX, centerY, wallAngle } = calculatePositionOnWall(wall, windowInstance.position)
 
     // Window dimensions in meters
     const windowWidth = windowInstance.width / 100
@@ -41,12 +33,9 @@ export const Window3D = memo(function Window3D({ window: windowInstance, wall, i
     const frameThickness = 0.05 // 5cm frame
     const frameDepth = wall.thickness / 100 + 0.02 // Slightly thicker than wall
 
-    // Position along wall (normalized 0-1) - position is already the center
-    const positionAlongWall = windowInstance.position / wallLength
-
-    // Calculate 3D position
-    const windowCenterX = (wall.start.x + dx * positionAlongWall) / 100
-    const windowCenterZ = (wall.start.y + dy * positionAlongWall) / 100
+    // Calculate 3D position (convert cm to meters)
+    const windowCenterX = centerX / 100
+    const windowCenterZ = centerY / 100
     const windowCenterY = (windowInstance.elevationFromFloor + windowInstance.height / 2) / 100
 
     // Determine if this is a divided window (double type has center divider)
@@ -67,7 +56,7 @@ export const Window3D = memo(function Window3D({ window: windowInstance, wall, i
     }
   }, [windowInstance, wall])
 
-  const frameColor = isSelected ? COLORS.frameSelected : windowInstance.frameMaterial.colorOverride || COLORS.frame
+  const frameColor = isSelected ? NORDIC_COLORS.wallSelected : windowInstance.frameMaterial.colorOverride || COLORS_3D.windowFrame
   const glassOpacity = windowInstance.glassOpacity
 
   return (
@@ -126,7 +115,7 @@ export const Window3D = memo(function Window3D({ window: windowInstance, wall, i
               windowHeight - frameThickness * 2
             ]} />
             <meshStandardMaterial
-              color={COLORS.glass}
+              color={COLORS_3D.windowGlass}
               transparent
               opacity={glassOpacity}
               roughness={0.1}
@@ -141,7 +130,7 @@ export const Window3D = memo(function Window3D({ window: windowInstance, wall, i
               windowHeight - frameThickness * 2
             ]} />
             <meshStandardMaterial
-              color={COLORS.glass}
+              color={COLORS_3D.windowGlass}
               transparent
               opacity={glassOpacity}
               roughness={0.1}
@@ -159,7 +148,7 @@ export const Window3D = memo(function Window3D({ window: windowInstance, wall, i
               windowHeight / 2 - frameThickness * 1.3
             ]} />
             <meshStandardMaterial
-              color={COLORS.glass}
+              color={COLORS_3D.windowGlass}
               transparent
               opacity={glassOpacity}
               roughness={0.1}
@@ -174,7 +163,7 @@ export const Window3D = memo(function Window3D({ window: windowInstance, wall, i
               windowHeight / 2 - frameThickness * 1.3
             ]} />
             <meshStandardMaterial
-              color={COLORS.glass}
+              color={COLORS_3D.windowGlass}
               transparent
               opacity={glassOpacity}
               roughness={0.1}
@@ -191,7 +180,7 @@ export const Window3D = memo(function Window3D({ window: windowInstance, wall, i
             windowHeight - frameThickness * 2
           ]} />
           <meshStandardMaterial
-            color={COLORS.glass}
+            color={COLORS_3D.windowGlass}
             transparent
             opacity={glassOpacity}
             roughness={0.1}

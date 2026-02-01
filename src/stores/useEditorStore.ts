@@ -49,6 +49,9 @@ interface EditorState {
   // Group editing state (when editing inside a group)
   editingGroupId: string | null
 
+  // Room snap guides (for visual feedback during room drawing/moving)
+  roomSnapGuides: Array<{ axis: 'horizontal' | 'vertical'; position: number; start: number; end: number }>
+
   // 3D Camera state
   camera3DMode: Camera3DMode
   walkthroughPosition: Point3D | null
@@ -100,6 +103,10 @@ interface EditorState {
   enterGroupEdit: (groupId: string) => void
   exitGroupEdit: () => void
 
+  // Room snap guide actions
+  setRoomSnapGuides: (guides: EditorState['roomSnapGuides']) => void
+  clearRoomSnapGuides: () => void
+
   // 3D Camera actions
   setCamera3DMode: (mode: Camera3DMode) => void
   setWalkthroughPosition: (pos: Point3D | null) => void
@@ -141,6 +148,8 @@ export const useEditorStore = create<EditorState>()(
     isDragging: false,
 
     editingGroupId: null,
+
+    roomSnapGuides: [],
 
     camera3DMode: 'walkthrough',
     walkthroughPosition: null,
@@ -367,6 +376,20 @@ export const useEditorStore = create<EditorState>()(
       set((state) => {
         state.editingGroupId = null
         state.selectedIds = []
+      })
+    },
+
+    // ==================== Room Snap Guide Actions ====================
+
+    setRoomSnapGuides: (guides) => {
+      set((state) => {
+        state.roomSnapGuides = guides
+      })
+    },
+
+    clearRoomSnapGuides: () => {
+      set((state) => {
+        state.roomSnapGuides = []
       })
     },
 

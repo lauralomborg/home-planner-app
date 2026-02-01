@@ -1,4 +1,5 @@
 export { Header } from './Header'
-export { Sidebar } from './Sidebar'
+export { LeftPanel } from './LeftPanel'
 export { PropertyPanel } from './PropertyPanel'
 export { ViewportContainer } from './ViewportContainer'
+export { FloatingToolbar } from './FloatingToolbar'

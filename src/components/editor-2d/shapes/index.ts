@@ -1,4 +1,5 @@
 export { WallShape } from './WallShape'
+export { WallJointShape } from './WallJointShape'
 export { WindowShape } from './WindowShape'
 export { DoorShape } from './DoorShape'
 export { RoomShape } from './RoomShape'

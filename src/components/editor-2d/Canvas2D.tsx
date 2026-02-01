@@ -3,106 +3,18 @@ import { Stage, Layer, Rect, Line, Transformer } from 'react-konva'
 import type { KonvaEventObject } from 'konva/lib/Node'
 import type Konva from 'konva'
 import { useFloorPlanStore, useEditorStore } from '@/stores'
-import type { Point2D, Wall, FurnitureInstance } from '@/models'
+import type { Point2D, Wall } from '@/models'
 import { DEFAULT_WALL_THICKNESS, DEFAULT_WALL_HEIGHT, DEFAULT_WINDOW_HEIGHT, DEFAULT_WINDOW_ELEVATION, DEFAULT_DOOR_HEIGHT } from '@/models'
 import { FURNITURE_CATALOG } from '@/services/catalog'
 import { COLORS_2D } from '@/constants/colors'
 
 // Import extracted components
-import { WallShape, WindowShape, DoorShape, RoomShape, FurnitureShape } from './shapes'
+import { WallShape, WallJointShape, WindowShape, DoorShape, RoomShape, FurnitureShape } from './shapes'
 import { Grid, OriginMarker, WallPreview } from './utils'
 import { GRID_SIZE, snapToGrid } from './types'
-
-// Smart alignment guide calculation
-interface AlignmentGuide {
-  type: 'horizontal' | 'vertical'
-  position: number // x for vertical, y for horizontal
-  start: number // start of line
-  end: number // end of line
-}
-
-const SNAP_THRESHOLD = 8 // pixels
-
-function calculateAlignmentGuides(
-  draggedItems: FurnitureInstance[],
-  otherItems: FurnitureInstance[],
-  scale: number
-): { guides: AlignmentGuide[]; snapDelta: Point2D } {
-  const guides: AlignmentGuide[] = []
-  let snapDeltaX = 0
-  let snapDeltaY = 0
-  const threshold = SNAP_THRESHOLD / scale
-
-  // Get bounding box of dragged items
-  if (draggedItems.length === 0) return { guides, snapDelta: { x: 0, y: 0 } }
-
-  const draggedBounds = {
-    left: Math.min(...draggedItems.map((f) => f.position.x - f.dimensions.width / 2)),
-    right: Math.max(...draggedItems.map((f) => f.position.x + f.dimensions.width / 2)),
-    top: Math.min(...draggedItems.map((f) => f.position.y - f.dimensions.depth / 2)),
-    bottom: Math.max(...draggedItems.map((f) => f.position.y + f.dimensions.depth / 2)),
-  }
-  const draggedCenterX = (draggedBounds.left + draggedBounds.right) / 2
-  const draggedCenterY = (draggedBounds.top + draggedBounds.bottom) / 2
-
-  // Check alignment with other items
-  for (const other of otherItems) {
-    const otherBounds = {
-      left: other.position.x - other.dimensions.width / 2,
-      right: other.position.x + other.dimensions.width / 2,
-      top: other.position.y - other.dimensions.depth / 2,
-      bottom: other.position.y + other.dimensions.depth / 2,
-    }
-    const otherCenterX = other.position.x
-    const otherCenterY = other.position.y
-
-    // Vertical guides (for X alignment)
-    const verticalChecks = [
-      { dragged: draggedBounds.left, other: otherBounds.left },
-      { dragged: draggedBounds.right, other: otherBounds.right },
-      { dragged: draggedBounds.left, other: otherBounds.right },
-      { dragged: draggedBounds.right, other: otherBounds.left },
-      { dragged: draggedCenterX, other: otherCenterX },
-    ]
-
-    for (const check of verticalChecks) {
-      const diff = check.other - check.dragged
-      if (Math.abs(diff) < threshold) {
-        if (snapDeltaX === 0) snapDeltaX = diff
-        guides.push({
-          type: 'vertical',
-          position: check.other,
-          start: Math.min(draggedBounds.top, otherBounds.top) - 20,
-          end: Math.max(draggedBounds.bottom, otherBounds.bottom) + 20,
-        })
-      }
-    }
-
-    // Horizontal guides (for Y alignment)
-    const horizontalChecks = [
-      { dragged: draggedBounds.top, other: otherBounds.top },
-      { dragged: draggedBounds.bottom, other: otherBounds.bottom },
-      { dragged: draggedBounds.top, other: otherBounds.bottom },
-      { dragged: draggedBounds.bottom, other: otherBounds.top },
-      { dragged: draggedCenterY, other: otherCenterY },
-    ]
-
-    for (const check of horizontalChecks) {
-      const diff = check.other - check.dragged
-      if (Math.abs(diff) < threshold) {
-        if (snapDeltaY === 0) snapDeltaY = diff
-        guides.push({
-          type: 'horizontal',
-          position: check.other,
-          start: Math.min(draggedBounds.left, otherBounds.left) - 20,
-          end: Math.max(draggedBounds.right, otherBounds.right) + 20,
-        })
-      }
-    }
-  }
-
-  return { guides, snapDelta: { x: snapDeltaX, y: snapDeltaY } }
-}
+import { buildWallJointMap, findNearestWallEndpoint, WALL_CONNECTION_TOLERANCE, calculateRoomSnap } from '@/services/geometry'
+import { calculateAlignmentGuides, type AlignmentGuide } from './utils/alignmentGuides'
+import { getItemsInMarquee } from './utils/marqueeSelection'
 
 export function Canvas2D() {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -152,8 +64,18 @@ export function Canvas2D() {
 
   // Store state
   const walls = useFloorPlanStore((state) => state.floorPlan.walls)
-  const rooms = useFloorPlanStore((state) => state.floorPlan.rooms)
+  const roomsUnsorted = useFloorPlanStore((state) => state.floorPlan.rooms)
   const furniture = useFloorPlanStore((state) => state.floorPlan.furniture)
+
+  // Sort rooms so larger (parent) rooms render first (behind) and smaller (child) rooms render on top
+  // This ensures child rooms are clickable/draggable when nested inside parent rooms
+  const rooms = useMemo(() => {
+    return [...roomsUnsorted].sort((a, b) => {
+      const areaA = a.bounds.width * a.bounds.height
+      const areaB = b.bounds.width * b.bounds.height
+      return areaB - areaA // Larger rooms first (rendered behind)
+    })
+  }, [roomsUnsorted])
   const windows = useFloorPlanStore((state) => state.floorPlan.windows)
   const doors = useFloorPlanStore((state) => state.floorPlan.doors)
   const { addWall, removeSelected, addWindow, addDoor, createRoomFromBounds, addFurniture } = useFloorPlanStore()
@@ -173,6 +95,7 @@ export function Canvas2D() {
     isMarqueeSelecting,
     marqueeStart,
     marqueeEnd,
+    roomSnapGuides,
     setZoom2D,
     setPan2D,
     startWallDraw,
@@ -185,6 +108,8 @@ export function Canvas2D() {
     startMarquee,
     updateMarquee,
     finishMarquee,
+    setRoomSnapGuides,
+    clearRoomSnapGuides,
   } = useEditorStore()
 
   // Create wall lookup for efficient access
@@ -194,111 +119,51 @@ export function Canvas2D() {
     return map
   }, [walls])
 
-  // Get items within a marquee rectangle (Figma-like: touch to select)
-  const getItemsInMarquee = useCallback((start: Point2D, end: Point2D): string[] => {
-    const minX = Math.min(start.x, end.x)
-    const maxX = Math.max(start.x, end.x)
-    const minY = Math.min(start.y, end.y)
-    const maxY = Math.max(start.y, end.y)
+  // Compute wall joints (where 2+ walls connect)
+  const wallJointMap = useMemo(() => {
+    return buildWallJointMap(walls, WALL_CONNECTION_TOLERANCE)
+  }, [walls])
 
-    const ids: string[] = []
-
-    // Helper: Check if line segment intersects rectangle
-    const lineIntersectsRect = (
-      x1: number, y1: number, x2: number, y2: number,
-      rectMinX: number, rectMinY: number, rectMaxX: number, rectMaxY: number
-    ): boolean => {
-      // Check if either endpoint is inside the rect
-      if ((x1 >= rectMinX && x1 <= rectMaxX && y1 >= rectMinY && y1 <= rectMaxY) ||
-          (x2 >= rectMinX && x2 <= rectMaxX && y2 >= rectMinY && y2 <= rectMaxY)) {
-        return true
-      }
-
-      // Check if line crosses any of the 4 rectangle edges
-      const linesCross = (ax1: number, ay1: number, ax2: number, ay2: number,
-                          bx1: number, by1: number, bx2: number, by2: number): boolean => {
-        const d1 = (bx2 - bx1) * (ay1 - by1) - (by2 - by1) * (ax1 - bx1)
-        const d2 = (bx2 - bx1) * (ay2 - by1) - (by2 - by1) * (ax2 - bx1)
-        const d3 = (ax2 - ax1) * (by1 - ay1) - (ay2 - ay1) * (bx1 - ax1)
-        const d4 = (ax2 - ax1) * (by2 - ay1) - (ay2 - ay1) * (bx2 - ax1)
-        return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
-               ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))
-      }
-
-      return linesCross(x1, y1, x2, y2, rectMinX, rectMinY, rectMaxX, rectMinY) ||
-             linesCross(x1, y1, x2, y2, rectMaxX, rectMinY, rectMaxX, rectMaxY) ||
-             linesCross(x1, y1, x2, y2, rectMinX, rectMaxY, rectMaxX, rectMaxY) ||
-             linesCross(x1, y1, x2, y2, rectMinX, rectMinY, rectMinX, rectMaxY)
+  // Get joint positions as array for rendering
+  const wallJointPositions = useMemo(() => {
+    const positions: Array<{ position: Point2D; wallIds: string[] }> = []
+    for (const [key, endpoints] of wallJointMap.entries()) {
+      const [x, y] = key.split(',').map(Number)
+      const wallIds = [...new Set(endpoints.map((e) => e.wallId))]
+      positions.push({ position: { x, y }, wallIds })
     }
+    return positions
+  }, [wallJointMap])
 
-    // Helper: Check if two rectangles intersect
-    const rectsIntersect = (
-      aMinX: number, aMinY: number, aMaxX: number, aMaxY: number,
-      bMinX: number, bMinY: number, bMaxX: number, bMaxY: number
-    ): boolean => aMinX < bMaxX && aMaxX > bMinX && aMinY < bMaxY && aMaxY > bMinY
-
-    // Check rooms
-    for (const r of rooms) {
-      if (rectsIntersect(minX, minY, maxX, maxY,
-          r.bounds.x, r.bounds.y, r.bounds.x + r.bounds.width, r.bounds.y + r.bounds.height)) {
-        ids.push(r.id)
-      }
-    }
-
-    // Check furniture
-    for (const f of furniture) {
-      const hw = f.dimensions.width / 2
-      const hd = f.dimensions.depth / 2
-      if (f.position.x - hw < maxX && f.position.x + hw > minX &&
-          f.position.y - hd < maxY && f.position.y + hd > minY) {
-        ids.push(f.id)
-      }
-    }
-
-    // Check walls
-    for (const w of walls) {
-      if (lineIntersectsRect(w.start.x, w.start.y, w.end.x, w.end.y, minX, minY, maxX, maxY)) {
-        ids.push(w.id)
-      }
-    }
-
-    // Check windows
-    for (const win of windows) {
-      const wall = wallsById.get(win.wallId)
-      if (wall) {
-        const dx = wall.end.x - wall.start.x
-        const dy = wall.end.y - wall.start.y
-        const length = Math.sqrt(dx * dx + dy * dy)
-        const t = win.position / length
-        const wx = wall.start.x + dx * t
-        const wy = wall.start.y + dy * t
-        const halfWidth = win.width / 2
-        if (rectsIntersect(minX, minY, maxX, maxY,
-            wx - halfWidth, wy - halfWidth, wx + halfWidth, wy + halfWidth)) {
-          ids.push(win.id)
+  // Helper to check if a wall endpoint is part of a joint
+  const isEndpointAtJoint = useCallback(
+    (wallId: string, endpoint: 'start' | 'end'): boolean => {
+      for (const endpoints of wallJointMap.values()) {
+        if (endpoints.length >= 2) {
+          for (const ep of endpoints) {
+            if (ep.wallId === wallId && ep.endpoint === endpoint) {
+              return true
+            }
+          }
         }
       }
-    }
+      return false
+    },
+    [wallJointMap]
+  )
 
-    // Check doors
-    for (const door of doors) {
-      const wall = wallsById.get(door.wallId)
-      if (wall) {
-        const dx = wall.end.x - wall.start.x
-        const dy = wall.end.y - wall.start.y
-        const length = Math.sqrt(dx * dx + dy * dy)
-        const t = door.position / length
-        const doorX = wall.start.x + dx * t
-        const doorY = wall.start.y + dy * t
-        const halfWidth = door.width / 2
-        if (rectsIntersect(minX, minY, maxX, maxY,
-            doorX - halfWidth, doorY - halfWidth, doorX + halfWidth, doorY + halfWidth)) {
-          ids.push(door.id)
-        }
-      }
-    }
-
-    return ids
+  // Get items within a marquee rectangle (uses extracted utility)
+  const getItemsInMarqueeCallback = useCallback((start: Point2D, end: Point2D): string[] => {
+    return getItemsInMarquee({
+      start,
+      end,
+      rooms,
+      furniture,
+      walls,
+      windows,
+      doors,
+      wallsById,
+    })
   }, [rooms, furniture, walls, windows, doors, wallsById])
 
   // Find wall at position for window/door placement
@@ -336,13 +201,18 @@ export function Canvas2D() {
       const snappedPos = snapToGrid(worldPos, GRID_SIZE, snapEnabled)
 
       if (activeTool === 'wall') {
+        // Try to snap to existing wall endpoint first, then grid
+        const ENDPOINT_SNAP_TOLERANCE = 15 / zoom2D // Pixels in world space
+        const nearestEndpoint = findNearestWallEndpoint(snappedPos, walls, ENDPOINT_SNAP_TOLERANCE)
+        const finalPos = nearestEndpoint || snappedPos
+
         if (!isDrawingWall) {
-          startWallDraw(snappedPos)
+          startWallDraw(finalPos)
         } else if (wallDrawStart) {
-          if (Math.abs(snappedPos.x - wallDrawStart.x) > 10 || Math.abs(snappedPos.y - wallDrawStart.y) > 10) {
+          if (Math.abs(finalPos.x - wallDrawStart.x) > 10 || Math.abs(finalPos.y - wallDrawStart.y) > 10) {
             addWall({
               start: wallDrawStart,
-              end: snappedPos,
+              end: finalPos,
               thickness: DEFAULT_WALL_THICKNESS,
               height: DEFAULT_WALL_HEIGHT,
               material: { materialId: 'white-paint' },
@@ -461,14 +331,41 @@ export function Canvas2D() {
         const pointerPos = stage.getPointerPosition()
         if (!pointerPos) return
         const worldPos = { x: (pointerPos.x - pan2D.x) / zoom2D, y: (pointerPos.y - pan2D.y) / zoom2D }
-        updateWallDrawPreview(snapToGrid(worldPos, GRID_SIZE, snapEnabled))
+        const snappedPos = snapToGrid(worldPos, GRID_SIZE, snapEnabled)
+        // Snap to existing wall endpoint if near
+        const ENDPOINT_SNAP_TOLERANCE = 15 / zoom2D
+        const nearestEndpoint = findNearestWallEndpoint(snappedPos, walls, ENDPOINT_SNAP_TOLERANCE)
+        updateWallDrawPreview(nearestEndpoint || snappedPos)
       }
 
       if (roomDrawStart) {
         const pointerPos = stage.getPointerPosition()
         if (!pointerPos) return
         const worldPos = { x: (pointerPos.x - pan2D.x) / zoom2D, y: (pointerPos.y - pan2D.y) / zoom2D }
-        setRoomDrawPreview(snapToGrid(worldPos, GRID_SIZE, snapEnabled))
+        const gridSnappedPos = snapToGrid(worldPos, GRID_SIZE, snapEnabled)
+
+        // Calculate proposed bounds for room snapping
+        const proposedBounds = {
+          x: Math.min(roomDrawStart.x, gridSnappedPos.x),
+          y: Math.min(roomDrawStart.y, gridSnappedPos.y),
+          width: Math.abs(gridSnappedPos.x - roomDrawStart.x),
+          height: Math.abs(gridSnappedPos.y - roomDrawStart.y),
+        }
+
+        // Check for room snapping
+        const snapResult = calculateRoomSnap(proposedBounds, rooms, undefined, 20)
+        setRoomSnapGuides(snapResult.snapGuides)
+
+        // Update preview with snapped bounds
+        const snappedBounds = snapResult.snappedBounds
+        // Determine which corner the preview point represents (opposite to start)
+        const previewX = gridSnappedPos.x >= roomDrawStart.x
+          ? snappedBounds.x + snappedBounds.width
+          : snappedBounds.x
+        const previewY = gridSnappedPos.y >= roomDrawStart.y
+          ? snappedBounds.y + snappedBounds.height
+          : snappedBounds.y
+        setRoomDrawPreview({ x: previewX, y: previewY })
       }
 
       if (isMarqueeSelecting) {
@@ -479,7 +376,7 @@ export function Canvas2D() {
       }
     },
     [isPanning, lastPointerPos, isDrawingWall, roomDrawStart, isMarqueeSelecting, zoom2D, pan2D, snapEnabled,
-     updateWallDrawPreview, updateMarquee, setPan2D]
+     updateWallDrawPreview, updateMarquee, setPan2D, walls, rooms, setRoomSnapGuides]
   )
 
   // Handle mouse up
@@ -506,10 +403,11 @@ export function Canvas2D() {
         }
         setRoomDrawStart(null)
         setRoomDrawPreview(null)
+        clearRoomSnapGuides()
       }
 
       if (isMarqueeSelecting && marqueeStart && marqueeEnd) {
-        const itemsInMarquee = getItemsInMarquee(marqueeStart, marqueeEnd)
+        const itemsInMarquee = getItemsInMarqueeCallback(marqueeStart, marqueeEnd)
         if (itemsInMarquee.length > 0) {
           if (e.evt.shiftKey) {
             select([...new Set([...selectedIds, ...itemsInMarquee])])
@@ -522,7 +420,7 @@ export function Canvas2D() {
       }
     },
     [isPanning, roomDrawStart, roomDrawPreview, isMarqueeSelecting, marqueeStart, marqueeEnd, selectedIds,
-     createRoomFromBounds, getItemsInMarquee, select, finishMarquee]
+     createRoomFromBounds, getItemsInMarqueeCallback, select, finishMarquee]
   )
 
   // Handle wheel for zoom
@@ -680,8 +578,25 @@ export function Canvas2D() {
               isSelected={selectedIds.includes(wall.id)}
               isHovered={hoveredId === wall.id}
               scale={zoom2D}
+              startIsJoint={isEndpointAtJoint(wall.id, 'start')}
+              endIsJoint={isEndpointAtJoint(wall.id, 'end')}
             />
           ))}
+
+          {/* Wall Joints (rendered when wall tool is active or walls are selected) */}
+          {(activeTool === 'wall' || selectedIds.some((id) => wallsById.has(id))) &&
+            wallJointPositions.map(({ position, wallIds }, index) => {
+              const isSelected = wallIds.some((id) => selectedIds.includes(id))
+              return (
+                <WallJointShape
+                  key={`joint-${index}`}
+                  position={position}
+                  connectedWallIds={wallIds}
+                  scale={zoom2D}
+                  isSelected={isSelected}
+                />
+              )
+            })}
 
           {/* Windows */}
           {windows.map((window) => {
@@ -771,6 +686,20 @@ export function Canvas2D() {
               stroke="#E74C3C"
               strokeWidth={1 / zoom2D}
               dash={[4 / zoom2D, 4 / zoom2D]}
+              listening={false}
+            />
+          ))}
+
+          {/* Room snap guides */}
+          {roomSnapGuides.map((guide, index) => (
+            <Line
+              key={`room-snap-${index}`}
+              points={guide.axis === 'vertical'
+                ? [guide.position, guide.start, guide.position, guide.end]
+                : [guide.start, guide.position, guide.end, guide.position]}
+              stroke="#3B82F6"
+              strokeWidth={2 / zoom2D}
+              dash={[6 / zoom2D, 3 / zoom2D]}
               listening={false}
             />
           ))}

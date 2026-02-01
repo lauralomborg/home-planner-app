@@ -535,6 +535,40 @@ export function findNearestWallEndpoint(
   return nearest
 }
 
+// ==================== Wall Position Utilities ====================
+
+/**
+ * Calculates the position of an item (window/door) along a wall.
+ * @param wall The wall the item is attached to
+ * @param positionAlongWall Distance from wall start to item center (in same units as wall coords)
+ * @returns Object containing center position, wall angle, and wall length
+ */
+export function calculatePositionOnWall(wall: Wall, positionAlongWall: number): {
+  centerX: number
+  centerY: number
+  wallAngle: number
+  wallLength: number
+} {
+  const dx = wall.end.x - wall.start.x
+  const dy = wall.end.y - wall.start.y
+  const wallLength = Math.sqrt(dx * dx + dy * dy)
+  const wallAngle = Math.atan2(dy, dx)
+
+  // Normalize position along wall (0-1)
+  const t = positionAlongWall / wallLength
+
+  // Calculate center position
+  const centerX = wall.start.x + dx * t
+  const centerY = wall.start.y + dy * t
+
+  return {
+    centerX,
+    centerY,
+    wallAngle,
+    wallLength,
+  }
+}
+
 // ==================== Room Detection ====================
 
 /**

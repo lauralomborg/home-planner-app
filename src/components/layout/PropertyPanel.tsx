@@ -1,10 +1,7 @@
-import { useState } from 'react'
 import { X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useEditorStore, useFloorPlanStore } from '@/stores'
-import { LayersPanel } from './layers'
 
 // Import extracted components
 import {
@@ -17,7 +14,6 @@ import {
 } from './property-panels'
 
 export function PropertyPanel() {
-  const [activeTab, setActiveTab] = useState<'properties' | 'layers'>('properties')
   const selectedIds = useEditorStore((state) => state.selectedIds)
   const activeTool = useEditorStore((state) => state.activeTool)
   const floorPlan = useFloorPlanStore((state) => state.floorPlan)
@@ -45,60 +41,45 @@ export function PropertyPanel() {
 
   return (
     <aside className="w-72 border-l border-border/50 bg-card/50 flex flex-col">
-      <div className="p-3 border-b border-border/40">
-        <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'properties' | 'layers')}>
-          <TabsList className="w-full grid grid-cols-2">
-            <TabsTrigger value="properties">Properties</TabsTrigger>
-            <TabsTrigger value="layers">Layers</TabsTrigger>
-          </TabsList>
-        </Tabs>
+      <div className="px-4 py-3 border-b border-border/40 flex items-center justify-between">
+        <h2 className="font-medium text-sm">{getSelectionType()}</h2>
+        {totalSelected > 0 && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-muted-foreground hover:text-foreground"
+            onClick={() => useEditorStore.getState().clearSelection()}
+          >
+            <X className="w-4 h-4" />
+          </Button>
+        )}
       </div>
 
-      {activeTab === 'properties' && (
-        <>
-          <div className="px-4 py-2 border-b border-border/40 flex items-center justify-between">
-            <h2 className="font-medium text-sm">{getSelectionType()}</h2>
-            {totalSelected > 0 && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                onClick={() => useEditorStore.getState().clearSelection()}
-              >
-                <X className="w-4 h-4" />
-              </Button>
-            )}
-          </div>
+      <ScrollArea className="flex-1 p-4">
+        {showFurnitureCatalog ? (
+          <FurnitureCatalog />
+        ) : (
+          <>
+            {totalSelected === 0 && <NoSelection />}
 
-          <ScrollArea className="flex-1 p-4">
-            {showFurnitureCatalog ? (
-              <FurnitureCatalog />
-            ) : (
+            {totalSelected === 1 && (
               <>
-                {totalSelected === 0 && <NoSelection />}
-
-                {totalSelected === 1 && (
-                  <>
-                    {selectedWalls.length === 1 && (
-                      <WallProperties wall={selectedWalls[0]} />
-                    )}
-                    {selectedRooms.length === 1 && (
-                      <RoomProperties room={selectedRooms[0]} />
-                    )}
-                    {selectedFurniture.length === 1 && (
-                      <FurnitureProperties furniture={selectedFurniture[0]} />
-                    )}
-                  </>
+                {selectedWalls.length === 1 && (
+                  <WallProperties wall={selectedWalls[0]} />
                 )}
-
-                {totalSelected > 1 && <MultipleSelection count={totalSelected} />}
+                {selectedRooms.length === 1 && (
+                  <RoomProperties room={selectedRooms[0]} />
+                )}
+                {selectedFurniture.length === 1 && (
+                  <FurnitureProperties furniture={selectedFurniture[0]} />
+                )}
               </>
             )}
-          </ScrollArea>
-        </>
-      )}
 
-      {activeTab === 'layers' && <LayersPanel />}
+            {totalSelected > 1 && <MultipleSelection count={totalSelected} />}
+          </>
+        )}
+      </ScrollArea>
     </aside>
   )
 }

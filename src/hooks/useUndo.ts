@@ -296,12 +296,6 @@ export function useKeyboardShortcuts() {
           case 'd':
             setActiveTool('door')
             break
-          case 'l':
-            setActiveTool('light')
-            break
-          case 'm':
-            setActiveTool('measure')
-            break
           case 'h':
             setActiveTool('pan')
             break

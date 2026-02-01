@@ -4,6 +4,7 @@ import type { KonvaEventObject } from 'konva/lib/Node'
 import { useEditorStore, useFloorPlanStore } from '@/stores'
 import { COLORS_2D } from '@/constants/colors'
 import { handleSelectWithModifiers } from '../types'
+import { calculatePositionOnWall } from '@/services/geometry'
 import type { WindowInstance, Wall } from '@/models'
 
 interface WindowShapeProps {
@@ -23,15 +24,9 @@ export const WindowShape = memo(function WindowShape({
   const { updateWindow } = useFloorPlanStore()
 
   // Calculate window position on wall
+  const { centerX, centerY, wallAngle, wallLength } = calculatePositionOnWall(wall, window.position)
   const dx = wall.end.x - wall.start.x
   const dy = wall.end.y - wall.start.y
-  const wallLength = Math.sqrt(dx * dx + dy * dy)
-  const angle = Math.atan2(dy, dx)
-
-  // Position along wall
-  const t = window.position / wallLength
-  const centerX = wall.start.x + dx * t
-  const centerY = wall.start.y + dy * t
 
   const windowWidth = window.width
   const thickness = wall.thickness + 4
@@ -68,7 +63,7 @@ export const WindowShape = memo(function WindowShape({
     <Group
       x={centerX}
       y={centerY}
-      rotation={angle * (180 / Math.PI)}
+      rotation={wallAngle * (180 / Math.PI)}
       draggable
       onClick={(e) => handleSelectWithModifiers(e, window.id, select, addToSelection, toggleSelection)}
       onDragStart={() => setIsDragging(true)}

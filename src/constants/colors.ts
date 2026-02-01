@@ -49,6 +49,11 @@ export const NORDIC_COLORS = {
   // Groups
   groupIndicator: '#9B59B6',
   groupEditMode: '#E8DAEF',
+
+  // Wall Joints
+  wallJoint: '#5B8A72',
+  wallJointHover: '#4A7A62',
+  wallJointConnected: '#3D6B54',
 }
 
 // 2D Canvas colors
@@ -73,6 +78,9 @@ export const COLORS_2D = {
   roomFloor: NORDIC_COLORS.roomFloor,
   roomSelected: NORDIC_COLORS.roomSelected,
   roomLabel: NORDIC_COLORS.roomLabel,
+  wallJoint: NORDIC_COLORS.wallJoint,
+  wallJointHover: NORDIC_COLORS.wallJointHover,
+  wallJointConnected: NORDIC_COLORS.wallJointConnected,
 }
 
 // 3D Scene colors
@@ -93,4 +101,15 @@ export const COLORS_3D = {
 export const GROUP_COLORS = {
   indicator: NORDIC_COLORS.groupIndicator,
   editMode: NORDIC_COLORS.groupEditMode,
+}
+
+// Furniture generation colors (for procedural 3D furniture)
+export const COLORS_FURNITURE = {
+  woodDark: '#8B7355',
+  woodMedium: '#A08060',
+  woodLight: '#C4A77D',
+  metal: '#9A9A9A',
+  metalDark: '#707070',
+  fabric: '#D4C4B0',
+  glass: '#87CEEB',
 }

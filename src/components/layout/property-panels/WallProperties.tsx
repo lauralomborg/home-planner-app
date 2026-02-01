@@ -1,10 +1,9 @@
-import { Trash2 } from 'lucide-react'
-import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Separator } from '@/components/ui/separator'
 import { useEditorStore, useFloorPlanStore } from '@/stores'
 import type { Wall } from '@/models'
-import { PropertyRow, PropertySection } from './PropertyComponents'
+import { PropertyRow, PropertySection, DeleteButton } from './PropertyComponents'
+import { MaterialSelector, WALL_PAINTS } from '@/components/ui/material-selector'
 
 export function WallProperties({ wall }: { wall: Wall }) {
   const updateWall = useFloorPlanStore((state) => state.updateWall)
@@ -76,45 +75,20 @@ export function WallProperties({ wall }: { wall: Wall }) {
       <Separator className="bg-border/40" />
 
       <PropertySection title="Material">
-        <div className="flex flex-wrap gap-2">
-          {[
-            { color: '#FFFFFF', name: 'White' },
-            { color: '#F5F0E8', name: 'Cream' },
-            { color: '#E8E0D5', name: 'Warm Gray' },
-            { color: '#D4C4B0', name: 'Beige' },
-          ].map(({ color, name }) => (
-            <button
-              key={color}
-              className="w-10 h-10 rounded-lg border-2 hover:scale-105 transition-all"
-              style={{
-                backgroundColor: color,
-                borderColor:
-                  wall.material.colorOverride === color
-                    ? 'hsl(var(--primary))'
-                    : 'hsl(var(--border) / 0.4)',
-              }}
-              onClick={() =>
-                updateWall(wall.id, {
-                  material: { materialId: 'color', colorOverride: color },
-                })
-              }
-              title={name}
-            />
-          ))}
-        </div>
+        <MaterialSelector
+          options={WALL_PAINTS}
+          selectedColor={wall.material.colorOverride}
+          onSelect={(color) =>
+            updateWall(wall.id, {
+              material: { materialId: 'color', colorOverride: color },
+            })
+          }
+        />
       </PropertySection>
 
       <Separator className="bg-border/40" />
 
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={handleDelete}
-        className="w-full text-destructive hover:text-destructive hover:bg-destructive/10 border-destructive/20"
-      >
-        <Trash2 className="w-4 h-4 mr-2" />
-        Delete Wall
-      </Button>
+      <DeleteButton onClick={handleDelete} label="Delete Wall" />
     </div>
   )
 }

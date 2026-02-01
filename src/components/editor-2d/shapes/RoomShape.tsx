@@ -4,6 +4,7 @@ import type Konva from 'konva'
 import { useEditorStore, useFloorPlanStore } from '@/stores'
 import { COLORS_2D } from '@/constants/colors'
 import { handleSelectWithModifiers } from '../types'
+import { calculateRoomSnap } from '@/services/geometry'
 import type { Room } from '@/models'
 
 interface RoomShapeProps {
@@ -24,8 +25,9 @@ export const RoomShape = memo(function RoomShape({
   onUnregisterNode,
 }: RoomShapeProps) {
   const shapeRef = useRef<Konva.Rect>(null)
-  const { select, addToSelection, toggleSelection, setHovered, activeTool, setIsDragging } = useEditorStore()
-  const { moveRoomTo, resizeRoom } = useFloorPlanStore()
+  const { select, addToSelection, toggleSelection, setHovered, activeTool, setIsDragging, setRoomSnapGuides, clearRoomSnapGuides } = useEditorStore()
+  const { moveRoomTo, resizeRoom, finishRoomMove } = useFloorPlanStore()
+  const allRooms = useFloorPlanStore((state) => state.floorPlan.rooms)
 
   // Use bounds directly instead of deriving from walls
   const { x, y, width, height } = room.bounds
@@ -59,11 +61,30 @@ export const RoomShape = memo(function RoomShape({
         draggable={activeTool === 'select'}
         onDragStart={() => setIsDragging(true)}
         onDragMove={(e) => {
-          // Direct position update like furniture
           const newPos = { x: e.target.x(), y: e.target.y() }
-          moveRoomTo(room.id, newPos)
+
+          // Calculate proposed bounds
+          const proposedBounds = {
+            x: newPos.x,
+            y: newPos.y,
+            width: room.bounds.width,
+            height: room.bounds.height,
+          }
+
+          // Calculate snap with other rooms
+          const snapResult = calculateRoomSnap(proposedBounds, allRooms, room.id, 20)
+          setRoomSnapGuides(snapResult.snapGuides)
+
+          // Apply snapped position
+          e.target.x(snapResult.snappedBounds.x)
+          e.target.y(snapResult.snappedBounds.y)
+          moveRoomTo(room.id, { x: snapResult.snappedBounds.x, y: snapResult.snappedBounds.y })
         }}
-        onDragEnd={() => setIsDragging(false)}
+        onDragEnd={() => {
+          setIsDragging(false)
+          clearRoomSnapGuides()
+          finishRoomMove(room.id)
+        }}
         onTransformEnd={() => {
           // Get the transformed values
           const node = shapeRef.current

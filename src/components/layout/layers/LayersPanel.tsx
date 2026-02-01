@@ -23,12 +23,15 @@ import { LayerNode } from './LayerNode'
 export function LayersPanel() {
   const { flatNodes } = useLayerTree()
   const selectedIds = useEditorStore((state) => state.selectedIds)
+  const groups = useFloorPlanStore((state) => state.floorPlan.groups)
+  const rooms = useFloorPlanStore((state) => state.floorPlan.rooms)
   const {
     reorderFurniture,
     reorderRoom,
     reorderGroup,
     reparentToGroup,
     reparentFurniture,
+    reparentRoom,
   } = useFloorPlanStore()
 
   // Track expanded nodes
@@ -103,10 +106,15 @@ export function LayersPanel() {
     return flatNodes.filter(isNodeVisible)
   }, [flatNodes, isNodeVisible])
 
-  // Sortable IDs (only visible nodes)
+  // Sortable IDs - include all groups and rooms as potential drop targets
+  // even when collapsed, so users can drop onto collapsed containers
   const sortableIds = useMemo(() => {
-    return visibleNodes.map((n) => n.id)
-  }, [visibleNodes])
+    const visibleIds = visibleNodes.map((n) => n.id)
+    // Add collapsed groups and rooms as drop targets
+    const groupIds = groups.map((g) => g.id)
+    const roomIds = rooms.map((r) => r.id)
+    return [...new Set([...visibleIds, ...groupIds, ...roomIds])]
+  }, [visibleNodes, groups, rooms])
 
   const handleDragStart = (event: DragStartEvent) => {
     setActiveId(event.active.id as string)
@@ -163,6 +171,15 @@ export function LayersPanel() {
     ) {
       reparentToGroup(activeNode.id, null)
       reparentFurniture(activeNode.id, null)
+    }
+    // Handle room-to-room reparenting (drag room onto another room)
+    else if (activeNode.type === 'room' && overNode.type === 'room') {
+      reparentRoom(activeNode.id, overNode.id)
+      setExpandedIds((prev) => new Set([...prev, overNode.id]))
+    }
+    // Handle dragging room to root level (onto unassigned)
+    else if (activeNode.type === 'room' && overNode.type === 'unassigned') {
+      reparentRoom(activeNode.id, null)
     }
   }
 

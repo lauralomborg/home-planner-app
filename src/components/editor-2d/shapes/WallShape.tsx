@@ -1,16 +1,20 @@
-import { memo } from 'react'
+import { memo, useCallback } from 'react'
 import { Line, Circle, Group } from 'react-konva'
 import { useEditorStore, useFloorPlanStore } from '@/stores'
 import { COLORS_2D } from '@/constants/colors'
 import { handleSelectWithModifiers } from '../types'
 import { MeasurementLabel } from '../utils/MeasurementLabel'
-import type { Wall } from '@/models'
+import type { Wall, Point2D } from '@/models'
 
 interface WallShapeProps {
   wall: Wall
   isSelected: boolean
   isHovered: boolean
   scale: number
+  /** Whether the start endpoint is part of a joint (2+ walls connected) */
+  startIsJoint?: boolean
+  /** Whether the end endpoint is part of a joint (2+ walls connected) */
+  endIsJoint?: boolean
 }
 
 export const WallShape = memo(function WallShape({
@@ -18,9 +22,11 @@ export const WallShape = memo(function WallShape({
   isSelected,
   isHovered,
   scale,
+  startIsJoint = false,
+  endIsJoint = false,
 }: WallShapeProps) {
   const { select, addToSelection, toggleSelection, setHovered, setIsDragging, activeTool } = useEditorStore()
-  const { moveWallEndpoint } = useFloorPlanStore()
+  const { moveWallEndpoint, moveWallJoint } = useFloorPlanStore()
 
   const dx = wall.end.x - wall.start.x
   const dy = wall.end.y - wall.start.y
@@ -38,6 +44,35 @@ export const WallShape = memo(function WallShape({
     : baseColor
 
   const handleRadius = 8 / scale
+
+  // Joint-aware endpoint drag handlers
+  const handleStartDrag = useCallback(
+    (e: any) => {
+      const newPos: Point2D = { x: e.target.x(), y: e.target.y() }
+      if (startIsJoint) {
+        // Move all walls connected at this joint
+        moveWallJoint(wall.start, newPos)
+      } else {
+        // Move just this endpoint
+        moveWallEndpoint(wall.id, 'start', newPos)
+      }
+    },
+    [wall.id, wall.start, startIsJoint, moveWallJoint, moveWallEndpoint]
+  )
+
+  const handleEndDrag = useCallback(
+    (e: any) => {
+      const newPos: Point2D = { x: e.target.x(), y: e.target.y() }
+      if (endIsJoint) {
+        // Move all walls connected at this joint
+        moveWallJoint(wall.end, newPos)
+      } else {
+        // Move just this endpoint
+        moveWallEndpoint(wall.id, 'end', newPos)
+      }
+    },
+    [wall.id, wall.end, endIsJoint, moveWallJoint, moveWallEndpoint]
+  )
 
   return (
     <Group>
@@ -76,18 +111,13 @@ export const WallShape = memo(function WallShape({
           <Circle
             x={wall.start.x}
             y={wall.start.y}
-            radius={handleRadius}
-            fill={COLORS_2D.handleFill}
-            stroke={COLORS_2D.handle}
+            radius={startIsJoint ? handleRadius * 1.3 : handleRadius}
+            fill={startIsJoint ? COLORS_2D.wallJoint : COLORS_2D.handleFill}
+            stroke={startIsJoint ? COLORS_2D.wallJointConnected : COLORS_2D.handle}
             strokeWidth={2 / scale}
             draggable
             onDragStart={() => setIsDragging(true)}
-            onDragMove={(e) => {
-              moveWallEndpoint(wall.id, 'start', {
-                x: e.target.x(),
-                y: e.target.y(),
-              })
-            }}
+            onDragMove={handleStartDrag}
             onDragEnd={() => setIsDragging(false)}
             onMouseEnter={(e) => {
               const stage = e.target.getStage()
@@ -101,18 +131,13 @@ export const WallShape = memo(function WallShape({
           <Circle
             x={wall.end.x}
             y={wall.end.y}
-            radius={handleRadius}
-            fill={COLORS_2D.handleFill}
-            stroke={COLORS_2D.handle}
+            radius={endIsJoint ? handleRadius * 1.3 : handleRadius}
+            fill={endIsJoint ? COLORS_2D.wallJoint : COLORS_2D.handleFill}
+            stroke={endIsJoint ? COLORS_2D.wallJointConnected : COLORS_2D.handle}
             strokeWidth={2 / scale}
             draggable
             onDragStart={() => setIsDragging(true)}
-            onDragMove={(e) => {
-              moveWallEndpoint(wall.id, 'end', {
-                x: e.target.x(),
-                y: e.target.y(),
-              })
-            }}
+            onDragMove={handleEndDrag}
             onDragEnd={() => setIsDragging(false)}
             onMouseEnter={(e) => {
               const stage = e.target.getStage()

@@ -4,6 +4,7 @@ import { useEditorStore, useActiveView } from '@/stores'
 import type { ViewMode } from '@/models'
 import { cn } from '@/lib/utils'
 import { CameraControls3D } from '@/components/editor-3d'
+import { FloatingToolbar } from './FloatingToolbar'
 
 interface ViewportContainerProps {
   canvas2D: React.ReactNode
@@ -73,6 +74,7 @@ export function ViewportContainer({ canvas2D, scene3D }: ViewportContainerProps)
               </span>
             </div>
             {canvas2D}
+            <FloatingToolbar />
           </div>
         )}
 

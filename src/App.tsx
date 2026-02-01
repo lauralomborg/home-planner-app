@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Header, Sidebar, PropertyPanel, ViewportContainer } from '@/components/layout'
+import { Header, LeftPanel, PropertyPanel, ViewportContainer } from '@/components/layout'
 import { Canvas2D } from '@/components/editor-2d/Canvas2D'
 import { Scene3D } from '@/components/editor-3d/Scene3D'
 import { useProjectStore, useActiveView, useFloorPlanStore } from '@/stores'
@@ -69,7 +69,7 @@ function App() {
     <div className="h-screen flex flex-col overflow-hidden">
       <Header />
       <div className="flex-1 flex overflow-hidden">
-        {showPanels && <Sidebar />}
+        {showPanels && <LeftPanel />}
         <ViewportContainer
           canvas2D={<Canvas2D />}
           scene3D={<Scene3D />}

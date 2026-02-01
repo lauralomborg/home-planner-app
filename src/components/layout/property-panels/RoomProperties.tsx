@@ -3,6 +3,7 @@ import { Separator } from '@/components/ui/separator'
 import { useFloorPlanStore } from '@/stores'
 import type { Room } from '@/models'
 import { PropertyRow, PropertySection } from './PropertyComponents'
+import { MaterialSelector, FLOOR_MATERIALS } from '@/components/ui/material-selector'
 
 export function RoomProperties({ room }: { room: Room }) {
   const { renameRoom, setRoomType, updateRoom, moveRoom, resizeRoom } = useFloorPlanStore()
@@ -116,32 +117,15 @@ export function RoomProperties({ room }: { room: Room }) {
       <Separator className="bg-border/40" />
 
       <PropertySection title="Floor">
-        <div className="flex flex-wrap gap-2">
-          {[
-            { color: '#D4C4B0', name: 'Light Wood' },
-            { color: '#B8A089', name: 'Oak' },
-            { color: '#8B7355', name: 'Walnut' },
-            { color: '#5C5650', name: 'Dark' },
-          ].map(({ color, name }) => (
-            <button
-              key={color}
-              className="w-10 h-10 rounded-lg border-2 hover:scale-105 transition-all"
-              style={{
-                backgroundColor: color,
-                borderColor:
-                  room.floorMaterial.colorOverride === color
-                    ? 'hsl(var(--primary))'
-                    : 'hsl(var(--border) / 0.4)',
-              }}
-              onClick={() =>
-                updateRoom(room.id, {
-                  floorMaterial: { materialId: 'color', colorOverride: color },
-                })
-              }
-              title={name}
-            />
-          ))}
-        </div>
+        <MaterialSelector
+          options={FLOOR_MATERIALS}
+          selectedColor={room.floorMaterial.colorOverride}
+          onSelect={(color) =>
+            updateRoom(room.id, {
+              floorMaterial: { materialId: 'color', colorOverride: color },
+            })
+          }
+        />
       </PropertySection>
     </div>
   )

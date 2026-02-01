@@ -1,4 +1,4 @@
-import { Save, Download, FolderOpen, Plus, Home } from 'lucide-react'
+import { Save, FolderOpen, Plus, Home } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useProjectStore } from '@/stores'
@@ -110,15 +110,6 @@ export function Header() {
         >
           <Save className="w-4 h-4 mr-1.5" />
           <span className="hidden sm:inline">Save</span>
-        </Button>
-
-        <Button
-          variant="ghost"
-          size="sm"
-          className="text-muted-foreground hover:text-foreground"
-        >
-          <Download className="w-4 h-4 mr-1.5" />
-          <span className="hidden sm:inline">Export</span>
         </Button>
       </div>
     </header>
