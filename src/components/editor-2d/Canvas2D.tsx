@@ -504,6 +504,22 @@ export function Canvas2D() {
         clearSelection()
       }
 
+      // Shift+0 to reset zoom to 100% (centered on current view)
+      if (e.code === 'Digit0' && e.shiftKey) {
+        e.preventDefault()
+        const newZoom = 1
+        // Calculate viewport center in world coordinates
+        const viewportCenterX = dimensions.width / 2
+        const viewportCenterY = dimensions.height / 2
+        const worldCenterX = (viewportCenterX - pan2D.x) / zoom2D
+        const worldCenterY = (viewportCenterY - pan2D.y) / zoom2D
+        // Calculate new pan to keep the same world position at center
+        const newPanX = viewportCenterX - worldCenterX * newZoom
+        const newPanY = viewportCenterY - worldCenterY * newZoom
+        setZoom2D(newZoom)
+        setPan2D({ x: newPanX, y: newPanY })
+      }
+
       // Arrow key movement for selected elements
       if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key) && selectedIds.length > 0) {
         e.preventDefault()
@@ -548,7 +564,7 @@ export function Canvas2D() {
       window.removeEventListener('keydown', handleKeyDown)
       window.removeEventListener('keyup', handleKeyUp)
     }
-  }, [isDrawingWall, cancelWallDraw, clearSelection, selectedIds, removeSelected, setActiveTool, roomDrawStart, isPanning, isMarqueeSelecting, finishMarquee, furniture, rooms, moveMultipleFurniture, moveRoom])
+  }, [isDrawingWall, cancelWallDraw, clearSelection, selectedIds, removeSelected, setActiveTool, roomDrawStart, isPanning, isMarqueeSelecting, finishMarquee, furniture, rooms, moveMultipleFurniture, moveRoom, setZoom2D, setPan2D, zoom2D, pan2D, dimensions])
 
   // Calculate alignment guides during furniture drag
   useEffect(() => {

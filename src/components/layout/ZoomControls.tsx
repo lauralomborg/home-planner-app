@@ -29,6 +29,7 @@ interface ZoomControlsProps {
 
 export function ZoomControls({ containerRef }: ZoomControlsProps) {
   const zoom2D = useEditorStore((state) => state.zoom2D)
+  const pan2D = useEditorStore((state) => state.pan2D)
   const setZoom2D = useEditorStore((state) => state.setZoom2D)
   const setPan2D = useEditorStore((state) => state.setPan2D)
   const floorPlan = useFloorPlanStore((state) => state.floorPlan)
@@ -53,20 +54,37 @@ export function ZoomControls({ containerRef }: ZoomControlsProps) {
     }
   }, [isDropdownOpen])
 
+  // Helper to zoom while keeping viewport center at the same world position
+  const zoomToCenter = useCallback((newZoom: number) => {
+    const viewportWidth = containerRef?.current?.clientWidth ?? window.innerWidth
+    const viewportHeight = containerRef?.current?.clientHeight ?? window.innerHeight
+
+    // Calculate viewport center in world coordinates
+    const worldCenterX = (viewportWidth / 2 - pan2D.x) / zoom2D
+    const worldCenterY = (viewportHeight / 2 - pan2D.y) / zoom2D
+
+    // Calculate new pan to keep same world position at center
+    const newPanX = viewportWidth / 2 - worldCenterX * newZoom
+    const newPanY = viewportHeight / 2 - worldCenterY * newZoom
+
+    setZoom2D(newZoom)
+    setPan2D({ x: newPanX, y: newPanY })
+  }, [zoom2D, pan2D, setZoom2D, setPan2D, containerRef])
+
   const handleZoomIn = useCallback(() => {
-    setZoom2D(getNextZoomLevel(zoom2D))
-  }, [zoom2D, setZoom2D])
+    zoomToCenter(getNextZoomLevel(zoom2D))
+  }, [zoom2D, zoomToCenter])
 
   const handleZoomOut = useCallback(() => {
-    setZoom2D(getPrevZoomLevel(zoom2D))
-  }, [zoom2D, setZoom2D])
+    zoomToCenter(getPrevZoomLevel(zoom2D))
+  }, [zoom2D, zoomToCenter])
 
   const handlePresetSelect = useCallback(
     (preset: number) => {
-      setZoom2D(preset)
+      zoomToCenter(preset)
       setIsDropdownOpen(false)
     },
-    [setZoom2D]
+    [zoomToCenter]
   )
 
   const handleFitToContent = useCallback(() => {
