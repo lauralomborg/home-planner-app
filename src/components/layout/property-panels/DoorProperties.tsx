@@ -37,8 +37,8 @@ export function DoorProperties({ door }: { door: DoorInstance }) {
           <Input
             type="number"
             value={Math.round(door.position)}
-            readOnly
-            className="h-8 text-sm bg-muted/50"
+            onChange={(e) => updateDoor(door.id, { position: Number(e.target.value) })}
+            className="h-8 text-sm"
           />
         </PropertyRow>
       </PropertySection>

@@ -30,8 +30,8 @@ export function WindowProperties({ window }: { window: WindowInstance }) {
           <Input
             type="number"
             value={Math.round(window.position)}
-            readOnly
-            className="h-8 text-sm bg-muted/50"
+            onChange={(e) => updateWindow(window.id, { position: Number(e.target.value) })}
+            className="h-8 text-sm"
           />
         </PropertyRow>
         <PropertyRow label="Height from floor">

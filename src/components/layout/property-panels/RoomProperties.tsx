@@ -78,10 +78,10 @@ export function RoomProperties({ room }: { room: Room }) {
               type="number"
               value={Math.round(room.bounds.width)}
               onChange={(e) => {
-                const newWidth = Math.max(50, Number(e.target.value))
-                resizeRoom(room.id, { ...room.bounds, width: newWidth })
+                resizeRoom(room.id, { ...room.bounds, width: Number(e.target.value) })
               }}
               className="h-8 text-sm"
+              min={1}
             />
           </PropertyRow>
           <PropertyRow label="Height">
@@ -89,10 +89,10 @@ export function RoomProperties({ room }: { room: Room }) {
               type="number"
               value={Math.round(room.bounds.height)}
               onChange={(e) => {
-                const newHeight = Math.max(50, Number(e.target.value))
-                resizeRoom(room.id, { ...room.bounds, height: newHeight })
+                resizeRoom(room.id, { ...room.bounds, height: Number(e.target.value) })
               }}
               className="h-8 text-sm"
+              min={1}
             />
           </PropertyRow>
         </div>
