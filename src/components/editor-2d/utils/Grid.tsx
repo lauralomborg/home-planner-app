@@ -25,6 +25,7 @@ export const Grid = memo(function Grid({
     let majorInterval = 100 // Major line every 100cm (1m)
 
     // When zoomed out, use larger grid cells to avoid too many lines
+    // At each level, ensure 1m major lines are visible
     if (scale < 0.03) {
       effectiveGridSize = GRID_SIZE * 1000 // 10m grid
       majorInterval = 10 // Major every 100m
@@ -35,9 +36,15 @@ export const Grid = memo(function Grid({
       effectiveGridSize = GRID_SIZE * 100 // 1m grid
       majorInterval = 10 // Major every 10m
     } else if (scale < 0.25) {
+      effectiveGridSize = GRID_SIZE * 100 // 1m grid (minor = major)
+      majorInterval = 1 // Every line is major (1m)
+    } else if (scale < 0.5) {
+      effectiveGridSize = GRID_SIZE * 50 // 50cm grid
+      majorInterval = 2 // Major every 1m
+    } else if (scale < 1) {
       effectiveGridSize = GRID_SIZE * 10 // 10cm grid
       majorInterval = 10 // Major every 1m
-    } else if (scale < 0.5) {
+    } else if (scale < 2) {
       effectiveGridSize = GRID_SIZE * 5 // 5cm grid
       majorInterval = 20 // Major every 1m
     }

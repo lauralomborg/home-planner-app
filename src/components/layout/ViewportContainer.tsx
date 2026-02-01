@@ -1,10 +1,11 @@
-import { useCallback } from 'react'
+import { useCallback, useRef } from 'react'
 import { Monitor, Box } from 'lucide-react'
 import { useEditorStore, useActiveView } from '@/stores'
 import type { ViewMode } from '@/models'
 import { cn } from '@/lib/utils'
 import { CameraControls3D } from '@/components/editor-3d'
 import { FloatingToolbar } from './FloatingToolbar'
+import { ZoomControls } from './ZoomControls'
 
 interface ViewportContainerProps {
   canvas2D: React.ReactNode
@@ -15,6 +16,7 @@ export function ViewportContainer({ canvas2D, scene3D }: ViewportContainerProps)
   const activeView = useActiveView()
   const setActiveView = useEditorStore((state) => state.setActiveView)
   const setCameraHeightCommand = useEditorStore((state) => state.setCameraHeightCommand)
+  const canvas2DContainerRef = useRef<HTMLDivElement>(null)
 
   const handleMoveUp = useCallback(() => {
     setCameraHeightCommand('up')
@@ -67,7 +69,7 @@ export function ViewportContainer({ canvas2D, scene3D }: ViewportContainerProps)
       <div className="flex-1 flex overflow-hidden">
         {/* 2D View */}
         {activeView === '2d' && (
-          <div className="relative overflow-hidden flex-1">
+          <div ref={canvas2DContainerRef} className="relative overflow-hidden flex-1">
             <div className="absolute top-3 left-3 z-10">
               <span className="text-[10px] font-medium bg-background/90 backdrop-blur-sm text-muted-foreground px-2.5 py-1 rounded-md border border-border/30 shadow-sm">
                 2D Floor Plan
@@ -75,6 +77,10 @@ export function ViewportContainer({ canvas2D, scene3D }: ViewportContainerProps)
             </div>
             {canvas2D}
             <FloatingToolbar />
+            {/* Zoom controls */}
+            <div className="absolute bottom-4 right-4 z-20">
+              <ZoomControls containerRef={canvas2DContainerRef} />
+            </div>
           </div>
         )}
 

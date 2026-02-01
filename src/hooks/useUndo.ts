@@ -277,6 +277,13 @@ export function useKeyboardShortcuts() {
         return
       }
 
+      // Shift+0: Reset zoom to 100%
+      if (e.shiftKey && e.key === '0' && activeView === '2d') {
+        e.preventDefault()
+        useEditorStore.getState().setZoom2D(1)
+        return
+      }
+
       // Tool shortcuts (no modifier) - only in 2D mode
       // In 3D mode, these keys (WASD etc.) are used for walkthrough movement
       if (!isMeta && !e.altKey && activeView === '2d') {

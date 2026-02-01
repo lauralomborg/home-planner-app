@@ -114,8 +114,19 @@ interface EditorState {
 }
 
 const DEFAULT_ZOOM = 1
-const MIN_ZOOM = 0.02
-const MAX_ZOOM = 20
+export const MIN_ZOOM = 0.02
+export const MAX_ZOOM = 20
+export const ZOOM_PRESETS = [0.1, 0.25, 0.5, 1, 2, 4] as const
+
+export function getNextZoomLevel(current: number): number {
+  const next = ZOOM_PRESETS.find((z) => z > current)
+  return next ?? MAX_ZOOM
+}
+
+export function getPrevZoomLevel(current: number): number {
+  const prev = [...ZOOM_PRESETS].reverse().find((z) => z < current)
+  return prev ?? MIN_ZOOM
+}
 
 export const useEditorStore = create<EditorState>()(
   immer((set) => ({
