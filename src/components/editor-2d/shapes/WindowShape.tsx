@@ -5,7 +5,7 @@ import type Konva from 'konva'
 import { useEditorStore, useFloorPlanStore } from '@/stores'
 import { COLORS_2D } from '@/constants/colors'
 import { handleSelectWithModifiers } from '../types'
-import { calculatePositionOnWall, findNearestWall } from '@/services/geometry'
+import { findNearestWall } from '@/services/geometry'
 import type { WindowInstance, Wall } from '@/models'
 
 interface WindowShapeProps {
@@ -35,13 +35,21 @@ export const WindowShape = memo(function WindowShape({
   // Track target wall during drag for wall-to-wall transfer
   const targetWallRef = useRef<{ wallId: string; position: number } | null>(null)
 
-  // Calculate window position on wall
-  const { centerX, centerY, wallAngle, wallLength } = calculatePositionOnWall(wall, window.position)
+  // Calculate window position on wall (position is left edge)
   const dx = wall.end.x - wall.start.x
   const dy = wall.end.y - wall.start.y
+  const wallLength = Math.sqrt(dx * dx + dy * dy)
+  const wallAngle = Math.atan2(dy, dx)
 
   const windowWidth = window.width
   const thickness = wall.thickness + 4
+
+  // Position is left edge, but Group needs to be at center for rotation
+  // Calculate center by adding half-width along the wall direction
+  const centerPos = window.position + windowWidth / 2
+  const t = centerPos / wallLength
+  const centerX = wall.start.x + dx * t
+  const centerY = wall.start.y + dy * t
 
   // Register/unregister with transformer when selected
   useEffect(() => {
@@ -59,16 +67,33 @@ export const WindowShape = memo(function WindowShape({
     if (!node) return
 
     const scaleX = node.scaleX()
+    const nodeX = node.x() // Check if position shifted (left handle was used)
 
     // Reset scale on the node
     node.scaleX(1)
     node.scaleY(1)
 
     // Calculate new width (minimum 30cm)
-    const newWidth = Math.max(30, windowWidth * scaleX)
+    const newWidth = Math.max(30, Math.round(windowWidth * scaleX))
 
-    updateWindow(window.id, { width: newWidth })
-  }, [windowWidth, window.id, updateWindow])
+    // If node.x changed, left handle was used - adjust position to keep right edge fixed
+    if (Math.abs(nodeX) > 0.1) {
+      const positionDelta = -nodeX // negative because left = negative x in local coords
+      const newPosition = Math.max(0, Math.min(wallLength - newWidth, Math.round(window.position + positionDelta)))
+      updateWindow(window.id, { width: newWidth, position: newPosition })
+    } else {
+      // Right handle used - just update width, clamp if needed
+      const maxPos = wallLength - newWidth
+      if (window.position > maxPos) {
+        updateWindow(window.id, { width: newWidth, position: Math.round(maxPos) })
+      } else {
+        updateWindow(window.id, { width: newWidth })
+      }
+    }
+
+    // Reset node position
+    node.x(0)
+  }, [windowWidth, window.id, window.position, wallLength, updateWindow])
 
   // Handle drag to move window along wall or to another wall
   const handleDragMove = useCallback((e: KonvaEventObject<DragEvent>) => {
@@ -87,18 +112,21 @@ export const WindowShape = memo(function WindowShape({
       const newWallDy = newWall.end.y - newWall.start.y
       const newWallLength = Math.sqrt(newWallDx * newWallDx + newWallDy * newWallDy)
 
-      // Clamp position on new wall
-      const minPos = windowWidth / 2
-      const maxPos = newWallLength - windowWidth / 2
-      const clampedPosition = Math.max(minPos, Math.min(maxPos, nearestResult.position))
+      // Clamp position on new wall (position is left edge)
+      const minPos = 0
+      const maxPos = newWallLength - windowWidth
+      // Snap to 1cm grid and clamp
+      const snappedPosition = Math.round(nearestResult.position - windowWidth / 2) // Convert center to left edge
+      const clampedPosition = Math.max(minPos, Math.min(maxPos, snappedPosition))
 
       targetWallRef.current = {
         wallId: newWall.id,
         position: clampedPosition,
       }
 
-      // Snap visual position to new wall
-      const t = clampedPosition / newWallLength
+      // Snap visual position to new wall (position is left edge, offset to center for visual)
+      const centerPos = clampedPosition + windowWidth / 2
+      const t = centerPos / newWallLength
       node.x(newWall.start.x + newWallDx * t)
       node.y(newWall.start.y + newWallDy * t)
       node.rotation(Math.atan2(newWallDy, newWallDx) * (180 / Math.PI))
@@ -110,20 +138,27 @@ export const WindowShape = memo(function WindowShape({
       const px = dragX - wall.start.x
       const py = dragY - wall.start.y
 
-      // Calculate position along wall (dot product / length)
+      // Calculate position along wall (dot product / length) - this gives center position
       const dotProduct = px * dx + py * dy
-      let newPosition = dotProduct / wallLength
+      const centerPosition = dotProduct / wallLength
 
-      // Clamp position to keep window within wall bounds
-      const minPos = windowWidth / 2
-      const maxPos = wallLength - windowWidth / 2
+      // Convert to left edge position
+      let newPosition = centerPosition - windowWidth / 2
+
+      // Snap to 1cm grid
+      newPosition = Math.round(newPosition)
+
+      // Clamp position to keep window within wall bounds (position is left edge)
+      const minPos = 0
+      const maxPos = wallLength - windowWidth
       newPosition = Math.max(minPos, Math.min(maxPos, newPosition))
 
       // Update window position in store
       updateWindow(window.id, { position: newPosition })
 
-      // Reset node position (the Group will re-render at correct position from state)
-      const newT = newPosition / wallLength
+      // Reset node position (position is left edge, offset to center for visual)
+      const centerPos = newPosition + windowWidth / 2
+      const newT = centerPos / wallLength
       node.x(wall.start.x + dx * newT)
       node.y(wall.start.y + dy * newT)
       node.rotation(wallAngle * (180 / Math.PI))

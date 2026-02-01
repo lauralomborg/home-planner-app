@@ -259,20 +259,20 @@ export function generateWallsFromBounds(
       openings: [],
       ownerRoomId: roomId,
     },
-    // Bottom wall
+    // Bottom wall (left to right)
     {
-      start: corners[2],
-      end: corners[3],
+      start: corners[3],
+      end: corners[2],
       thickness: wallThickness,
       height: wallHeight,
       material: defaultMaterial,
       openings: [],
       ownerRoomId: roomId,
     },
-    // Left wall
+    // Left wall (top to bottom)
     {
-      start: corners[3],
-      end: corners[0],
+      start: corners[0],
+      end: corners[3],
       thickness: wallThickness,
       height: wallHeight,
       material: defaultMaterial,

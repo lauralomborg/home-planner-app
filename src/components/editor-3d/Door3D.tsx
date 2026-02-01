@@ -1,7 +1,6 @@
 import { memo, useMemo } from 'react'
 import * as THREE from 'three'
 import type { DoorInstance, Wall } from '@/models'
-import { calculatePositionOnWall } from '@/services/geometry'
 import { COLORS_3D, NORDIC_COLORS, COLORS_FURNITURE } from '@/constants/colors'
 
 interface Door3DProps {
@@ -32,9 +31,6 @@ export const Door3D = memo(function Door3D({ door, wall, isSelected }: Door3DPro
     isSlidingDoor,
     hingeOnLeft,
   } = useMemo(() => {
-    // Calculate wall position using shared utility
-    const { centerX, centerY, wallAngle } = calculatePositionOnWall(wall, door.position)
-
     // Door dimensions in meters
     const doorWidth = door.width / 100
     const doorHeight = door.height / 100
@@ -42,6 +38,19 @@ export const Door3D = memo(function Door3D({ door, wall, isSelected }: Door3DPro
     const frameDepth = wall.thickness / 100 + 0.02
     const panelThickness = 0.04 // 4cm door panel
     const handleSize = 0.03
+
+    // Calculate wall properties
+    const dx = wall.end.x - wall.start.x
+    const dy = wall.end.y - wall.start.y
+    const wallLength = Math.sqrt(dx * dx + dy * dy)
+    const wallAngle = Math.atan2(dy, dx)
+
+    // Position is left edge, calculate center for 3D rendering
+    // Add half-width along wall direction to get center
+    const centerPos = door.position + door.width / 2
+    const t = centerPos / wallLength
+    const centerX = wall.start.x + dx * t
+    const centerY = wall.start.y + dy * t
 
     // Calculate 3D position (convert cm to meters)
     const doorCenterX = centerX / 100

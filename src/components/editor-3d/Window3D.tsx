@@ -1,7 +1,6 @@
 import { memo, useMemo } from 'react'
 import * as THREE from 'three'
 import type { WindowInstance, Wall } from '@/models'
-import { calculatePositionOnWall } from '@/services/geometry'
 import { COLORS_3D, NORDIC_COLORS } from '@/constants/colors'
 
 interface Window3DProps {
@@ -24,14 +23,24 @@ export const Window3D = memo(function Window3D({ window: windowInstance, wall, i
     hasCenterDivider,
     hasSlidingDivider,
   } = useMemo(() => {
-    // Calculate wall position using shared utility
-    const { centerX, centerY, wallAngle } = calculatePositionOnWall(wall, windowInstance.position)
-
     // Window dimensions in meters
     const windowWidth = windowInstance.width / 100
     const windowHeight = windowInstance.height / 100
     const frameThickness = 0.05 // 5cm frame
     const frameDepth = wall.thickness / 100 + 0.02 // Slightly thicker than wall
+
+    // Calculate wall properties
+    const dx = wall.end.x - wall.start.x
+    const dy = wall.end.y - wall.start.y
+    const wallLength = Math.sqrt(dx * dx + dy * dy)
+    const wallAngle = Math.atan2(dy, dx)
+
+    // Position is left edge, calculate center for 3D rendering
+    // Add half-width along wall direction to get center
+    const centerPos = windowInstance.position + windowInstance.width / 2
+    const t = centerPos / wallLength
+    const centerX = wall.start.x + dx * t
+    const centerY = wall.start.y + dy * t
 
     // Calculate 3D position (convert cm to meters)
     const windowCenterX = centerX / 100

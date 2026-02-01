@@ -165,9 +165,19 @@ export const useFloorPlanStore = create<FloorPlanState>()(
 
     addWall: (wall) => {
       const id = crypto.randomUUID()
+
+      // Normalize wall direction: start should be top-left
+      // (left takes priority, then top for vertical walls)
+      let { start, end } = wall
+      if (start.x > end.x || (start.x === end.x && start.y > end.y)) {
+        ;[start, end] = [end, start]
+      }
+
       set((state) => {
         state.floorPlan.walls.push({
           ...wall,
+          start,
+          end,
           id,
           openings: [],
         })

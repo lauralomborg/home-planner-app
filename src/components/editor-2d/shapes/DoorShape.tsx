@@ -5,7 +5,7 @@ import type Konva from 'konva'
 import { useEditorStore, useFloorPlanStore } from '@/stores'
 import { COLORS_2D } from '@/constants/colors'
 import { handleSelectWithModifiers } from '../types'
-import { calculatePositionOnWall, findNearestWall } from '@/services/geometry'
+import { findNearestWall } from '@/services/geometry'
 import type { DoorInstance, Wall } from '@/models'
 
 interface DoorShapeProps {
@@ -35,13 +35,21 @@ export const DoorShape = memo(function DoorShape({
   // Track target wall during drag for wall-to-wall transfer
   const targetWallRef = useRef<{ wallId: string; position: number } | null>(null)
 
-  // Calculate door position on wall
-  const { centerX, centerY, wallAngle, wallLength } = calculatePositionOnWall(wall, door.position)
+  // Calculate door position on wall (position is left edge)
   const dx = wall.end.x - wall.start.x
   const dy = wall.end.y - wall.start.y
+  const wallLength = Math.sqrt(dx * dx + dy * dy)
+  const wallAngle = Math.atan2(dy, dx)
 
   const doorWidth = door.width
   const thickness = wall.thickness + 4
+
+  // Position is left edge, but Group needs to be at center for rotation
+  // Calculate center by adding half-width along the wall direction
+  const centerPos = door.position + doorWidth / 2
+  const t = centerPos / wallLength
+  const centerX = wall.start.x + dx * t
+  const centerY = wall.start.y + dy * t
 
   // Register/unregister with transformer when selected
   useEffect(() => {
@@ -59,16 +67,33 @@ export const DoorShape = memo(function DoorShape({
     if (!node) return
 
     const scaleX = node.scaleX()
+    const nodeX = node.x() // Check if position shifted (left handle was used)
 
     // Reset scale on the node
     node.scaleX(1)
     node.scaleY(1)
 
     // Calculate new width (minimum 40cm)
-    const newWidth = Math.max(40, doorWidth * scaleX)
+    const newWidth = Math.max(40, Math.round(doorWidth * scaleX))
 
-    updateDoor(door.id, { width: newWidth })
-  }, [doorWidth, door.id, updateDoor])
+    // If node.x changed, left handle was used - adjust position to keep right edge fixed
+    if (Math.abs(nodeX) > 0.1) {
+      const positionDelta = -nodeX // negative because left = negative x in local coords
+      const newPosition = Math.max(0, Math.min(wallLength - newWidth, Math.round(door.position + positionDelta)))
+      updateDoor(door.id, { width: newWidth, position: newPosition })
+    } else {
+      // Right handle used - just update width, clamp if needed
+      const maxPos = wallLength - newWidth
+      if (door.position > maxPos) {
+        updateDoor(door.id, { width: newWidth, position: Math.round(maxPos) })
+      } else {
+        updateDoor(door.id, { width: newWidth })
+      }
+    }
+
+    // Reset node position
+    node.x(0)
+  }, [doorWidth, door.id, door.position, wallLength, updateDoor])
 
   // Determine hinge position based on open direction
   // left/inward = hinge on left side, right/outward = hinge on right side
@@ -94,18 +119,21 @@ export const DoorShape = memo(function DoorShape({
       const newWallDy = newWall.end.y - newWall.start.y
       const newWallLength = Math.sqrt(newWallDx * newWallDx + newWallDy * newWallDy)
 
-      // Clamp position on new wall
-      const minPos = doorWidth / 2
-      const maxPos = newWallLength - doorWidth / 2
-      const clampedPosition = Math.max(minPos, Math.min(maxPos, nearestResult.position))
+      // Clamp position on new wall (position is left edge)
+      const minPos = 0
+      const maxPos = newWallLength - doorWidth
+      // Snap to 1cm grid and clamp
+      const snappedPosition = Math.round(nearestResult.position - doorWidth / 2) // Convert center to left edge
+      const clampedPosition = Math.max(minPos, Math.min(maxPos, snappedPosition))
 
       targetWallRef.current = {
         wallId: newWall.id,
         position: clampedPosition,
       }
 
-      // Snap visual position to new wall
-      const t = clampedPosition / newWallLength
+      // Snap visual position to new wall (position is left edge, offset to center for visual)
+      const centerPos = clampedPosition + doorWidth / 2
+      const t = centerPos / newWallLength
       node.x(newWall.start.x + newWallDx * t)
       node.y(newWall.start.y + newWallDy * t)
       node.rotation(Math.atan2(newWallDy, newWallDx) * (180 / Math.PI))
@@ -117,20 +145,27 @@ export const DoorShape = memo(function DoorShape({
       const px = dragX - wall.start.x
       const py = dragY - wall.start.y
 
-      // Calculate position along wall (dot product / length)
+      // Calculate position along wall (dot product / length) - this gives center position
       const dotProduct = px * dx + py * dy
-      let newPosition = dotProduct / wallLength
+      const centerPosition = dotProduct / wallLength
 
-      // Clamp position to keep door within wall bounds
-      const minPos = doorWidth / 2
-      const maxPos = wallLength - doorWidth / 2
+      // Convert to left edge position
+      let newPosition = centerPosition - doorWidth / 2
+
+      // Snap to 1cm grid
+      newPosition = Math.round(newPosition)
+
+      // Clamp position to keep door within wall bounds (position is left edge)
+      const minPos = 0
+      const maxPos = wallLength - doorWidth
       newPosition = Math.max(minPos, Math.min(maxPos, newPosition))
 
       // Update door position in store
       updateDoor(door.id, { position: newPosition })
 
-      // Reset node position (the Group will re-render at correct position from state)
-      const newT = newPosition / wallLength
+      // Reset node position (position is left edge, offset to center for visual)
+      const centerPos = newPosition + doorWidth / 2
+      const newT = centerPos / wallLength
       node.x(wall.start.x + dx * newT)
       node.y(wall.start.y + dy * newT)
       node.rotation(wallAngle * (180 / Math.PI))
