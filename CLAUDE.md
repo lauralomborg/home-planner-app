@@ -4,6 +4,7 @@
 
 - **Commit changes regularly** as work progresses to keep a clean history
 - **NEVER push to main/master without explicit user permission** - always wait for confirmation that changes are working before pushing
+- **NEVER push without committing ALL changes first** - always run `git status` before pushing and commit any uncommitted work
 - Only push when the user confirms the changes are tested and ready
 
 ## Project Context
