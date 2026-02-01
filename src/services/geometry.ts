@@ -1,11 +1,13 @@
 import type {
   Point2D,
   Wall,
+  WallOpening,
   Room,
   RoomBounds,
   RoomType,
   MaterialRef,
   FurnitureInstance,
+  RoomConnection,
 } from '@/models'
 
 /**
@@ -220,6 +222,9 @@ export function isBoundsFullyContained(inner: RoomBounds, outer: RoomBounds): bo
 
 /**
  * Generates 4 walls from rectangular bounds.
+ * Walls are positioned OUTSIDE the room bounds - the room bounds represent
+ * the interior floor space, and walls extend outward from these bounds.
+ * Wall centerlines are offset outward by wallThickness/2.
  */
 export function generateWallsFromBounds(
   bounds: RoomBounds,
@@ -228,12 +233,15 @@ export function generateWallsFromBounds(
   wallHeight: number = 280
 ): Omit<Wall, 'id'>[] {
   const { x, y, width, height } = bounds
+  const halfT = wallThickness / 2
 
+  // Wall centerlines are offset outward from room bounds by half wall thickness
+  // This means the inner edge of the wall aligns with the room boundary
   const corners = [
-    { x, y }, // top-left
-    { x: x + width, y }, // top-right
-    { x: x + width, y: y + height }, // bottom-right
-    { x, y: y + height }, // bottom-left
+    { x: x - halfT, y: y - halfT }, // top-left (offset up and left)
+    { x: x + width + halfT, y: y - halfT }, // top-right (offset up and right)
+    { x: x + width + halfT, y: y + height + halfT }, // bottom-right (offset down and right)
+    { x: x - halfT, y: y + height + halfT }, // bottom-left (offset down and left)
   ]
 
   const defaultMaterial: MaterialRef = { materialId: 'white-paint' }
@@ -280,6 +288,233 @@ export function generateWallsFromBounds(
       ownerRoomId: roomId,
     },
   ]
+}
+
+/**
+ * Determines which edges of a room should have walls based on room connections.
+ * Returns an object with boolean flags for each edge.
+ *
+ * For 'direct' connections: no wall on that edge for either room
+ * For 'wall' connections: only the room with the lower ID generates the shared wall
+ */
+export function getWallEdgesForRoom(
+  roomId: string,
+  roomBounds: RoomBounds,
+  connections: RoomConnection[]
+): { top: boolean; right: boolean; bottom: boolean; left: boolean } {
+  const edges = { top: true, right: true, bottom: true, left: true }
+
+  // Room edge positions
+  const roomEdges = {
+    top: roomBounds.y,
+    bottom: roomBounds.y + roomBounds.height,
+    left: roomBounds.x,
+    right: roomBounds.x + roomBounds.width,
+  }
+
+  for (const conn of connections) {
+    // Check if this connection involves our room
+    if (!conn.roomIds.includes(roomId)) continue
+
+    const otherRoomId = conn.roomIds[0] === roomId ? conn.roomIds[1] : conn.roomIds[0]
+    const { start, end } = conn.sharedEdge
+
+    // Determine which edge this connection is on
+    const isHorizontal = Math.abs(start.y - end.y) < 1
+    const isVertical = Math.abs(start.x - end.x) < 1
+
+    if (isHorizontal) {
+      // Check if it's top or bottom edge
+      if (Math.abs(start.y - roomEdges.top) < 1) {
+        if (conn.type === 'direct') {
+          edges.top = false
+        } else if (conn.type === 'wall' && roomId > otherRoomId) {
+          // Only the room with lower ID generates the shared wall
+          edges.top = false
+        }
+      } else if (Math.abs(start.y - roomEdges.bottom) < 1) {
+        if (conn.type === 'direct') {
+          edges.bottom = false
+        } else if (conn.type === 'wall' && roomId > otherRoomId) {
+          edges.bottom = false
+        }
+      }
+    } else if (isVertical) {
+      // Check if it's left or right edge
+      if (Math.abs(start.x - roomEdges.left) < 1) {
+        if (conn.type === 'direct') {
+          edges.left = false
+        } else if (conn.type === 'wall' && roomId > otherRoomId) {
+          edges.left = false
+        }
+      } else if (Math.abs(start.x - roomEdges.right) < 1) {
+        if (conn.type === 'direct') {
+          edges.right = false
+        } else if (conn.type === 'wall' && roomId > otherRoomId) {
+          edges.right = false
+        }
+      }
+    }
+  }
+
+  return edges
+}
+
+/**
+ * Gets connection openings for a specific edge of a room.
+ * Converts connection openings (normalized 0-1) to wall openings (in cm).
+ */
+function getConnectionOpeningsForEdge(
+  roomId: string,
+  edge: 'top' | 'right' | 'bottom' | 'left',
+  roomBounds: RoomBounds,
+  connections: RoomConnection[],
+  wallHeight: number
+): WallOpening[] {
+  const openings: WallOpening[] = []
+
+  const roomEdges = {
+    top: roomBounds.y,
+    bottom: roomBounds.y + roomBounds.height,
+    left: roomBounds.x,
+    right: roomBounds.x + roomBounds.width,
+  }
+
+  for (const conn of connections) {
+    if (!conn.roomIds.includes(roomId)) continue
+    if (conn.type !== 'wall') continue
+    if (conn.openings.length === 0) continue
+
+    const otherRoomId = conn.roomIds[0] === roomId ? conn.roomIds[1] : conn.roomIds[0]
+    // Only the room with the lower ID generates the shared wall
+    if (roomId > otherRoomId) continue
+
+    const { start, end } = conn.sharedEdge
+    const isHorizontal = Math.abs(start.y - end.y) < 1
+    const isVertical = Math.abs(start.x - end.x) < 1
+
+    // Determine which edge this connection is on
+    let matchesEdge = false
+    if (isHorizontal && edge === 'top' && Math.abs(start.y - roomEdges.top) < 1) matchesEdge = true
+    if (isHorizontal && edge === 'bottom' && Math.abs(start.y - roomEdges.bottom) < 1) matchesEdge = true
+    if (isVertical && edge === 'left' && Math.abs(start.x - roomEdges.left) < 1) matchesEdge = true
+    if (isVertical && edge === 'right' && Math.abs(start.x - roomEdges.right) < 1) matchesEdge = true
+
+    if (!matchesEdge) continue
+
+    // Calculate edge length
+    const edgeLength = Math.sqrt(
+      Math.pow(end.x - start.x, 2) + Math.pow(end.y - start.y, 2)
+    )
+
+    // Convert each opening from normalized to actual position
+    for (const connOpening of conn.openings) {
+      // openingPosition is the center position along the wall
+      const openingStart = connOpening.position * edgeLength
+      const openingWidth = connOpening.width * edgeLength
+      const openingCenter = openingStart + openingWidth / 2
+
+      openings.push({
+        id: connOpening.id,
+        type: 'door', // Openings in connections are treated as doors (floor-to-ceiling gaps)
+        position: openingCenter,
+        width: openingWidth,
+        height: wallHeight, // Full height opening
+        elevationFromFloor: 0,
+        referenceId: connOpening.id,
+      })
+    }
+  }
+
+  return openings
+}
+
+/**
+ * Generates walls from rectangular bounds, taking into account room connections.
+ * - For 'direct' connections: no wall on that edge
+ * - For 'wall' connections: shared wall is owned by the room with lower ID
+ */
+export function generateWallsFromBoundsWithConnections(
+  bounds: RoomBounds,
+  roomId: string,
+  connections: RoomConnection[],
+  wallThickness: number = 15,
+  wallHeight: number = 280
+): Omit<Wall, 'id'>[] {
+  const { x, y, width, height } = bounds
+  const halfT = wallThickness / 2
+
+  // Determine which edges need walls based on connections
+  const needsWall = getWallEdgesForRoom(roomId, bounds, connections)
+
+  // Wall centerlines are offset outward from room bounds by half wall thickness
+  const corners = [
+    { x: x - halfT, y: y - halfT }, // top-left
+    { x: x + width + halfT, y: y - halfT }, // top-right
+    { x: x + width + halfT, y: y + height + halfT }, // bottom-right
+    { x: x - halfT, y: y + height + halfT }, // bottom-left
+  ]
+
+  const defaultMaterial: MaterialRef = { materialId: 'white-paint' }
+  const walls: Omit<Wall, 'id'>[] = []
+
+  // Top wall
+  if (needsWall.top) {
+    const connectionOpenings = getConnectionOpeningsForEdge(roomId, 'top', bounds, connections, wallHeight)
+    walls.push({
+      start: corners[0],
+      end: corners[1],
+      thickness: wallThickness,
+      height: wallHeight,
+      material: defaultMaterial,
+      openings: connectionOpenings,
+      ownerRoomId: roomId,
+    })
+  }
+
+  // Right wall
+  if (needsWall.right) {
+    const connectionOpenings = getConnectionOpeningsForEdge(roomId, 'right', bounds, connections, wallHeight)
+    walls.push({
+      start: corners[1],
+      end: corners[2],
+      thickness: wallThickness,
+      height: wallHeight,
+      material: defaultMaterial,
+      openings: connectionOpenings,
+      ownerRoomId: roomId,
+    })
+  }
+
+  // Bottom wall
+  if (needsWall.bottom) {
+    const connectionOpenings = getConnectionOpeningsForEdge(roomId, 'bottom', bounds, connections, wallHeight)
+    walls.push({
+      start: corners[3],
+      end: corners[2],
+      thickness: wallThickness,
+      height: wallHeight,
+      material: defaultMaterial,
+      openings: connectionOpenings,
+      ownerRoomId: roomId,
+    })
+  }
+
+  // Left wall
+  if (needsWall.left) {
+    const connectionOpenings = getConnectionOpeningsForEdge(roomId, 'left', bounds, connections, wallHeight)
+    walls.push({
+      start: corners[0],
+      end: corners[3],
+      thickness: wallThickness,
+      height: wallHeight,
+      material: defaultMaterial,
+      openings: connectionOpenings,
+      ownerRoomId: roomId,
+    })
+  }
+
+  return walls
 }
 
 /**
@@ -942,5 +1177,327 @@ export function calculateRoomSnap(
   }
 
   return { snappedBounds, snapGuides, adjacentEdges }
+}
+
+// ==================== Two-Mode Room Snapping ====================
+
+/**
+ * Snap thresholds for room connections:
+ * - SNAP_WITH_WALL: rooms snap with wall thickness gap between them (shared wall)
+ * - SNAP_DIRECT: rooms snap directly (bounds touch, no wall between)
+ */
+export const SNAP_WITH_WALL_THRESHOLD = 20
+export const SNAP_DIRECT_THRESHOLD = 5
+
+export type ConnectionSnapType = 'wall' | 'direct' | null
+
+export interface ConnectionSnapResult {
+  snappedBounds: RoomBounds
+  snapGuides: RoomSnapGuide[]
+  connectionType: ConnectionSnapType
+  adjacentRoomId: string | null
+  sharedEdge: {
+    start: Point2D
+    end: Point2D
+    proposedSide: 'top' | 'right' | 'bottom' | 'left'
+    adjacentSide: 'top' | 'right' | 'bottom' | 'left'
+  } | null
+}
+
+/**
+ * Calculates room snapping with two modes:
+ * 1. Direct connection (bounds touch) when rooms are very close
+ * 2. Wall connection (gap between rooms) when rooms are moderately close
+ *
+ * @param proposedBounds - The bounds of the room being moved/resized
+ * @param existingRooms - All other rooms to check for snapping
+ * @param excludeRoomId - ID of room being moved (to exclude from checks)
+ */
+export function calculateRoomSnapWithConnections(
+  proposedBounds: RoomBounds,
+  existingRooms: Room[],
+  excludeRoomId?: string
+): ConnectionSnapResult {
+  const snapGuides: RoomSnapGuide[] = []
+  let snappedBounds = { ...proposedBounds }
+  let connectionType: ConnectionSnapType = null
+  let adjacentRoomId: string | null = null
+  let sharedEdge: ConnectionSnapResult['sharedEdge'] = null
+
+  // Get edges of proposed room
+  const proposedEdges = {
+    top: proposedBounds.y,
+    bottom: proposedBounds.y + proposedBounds.height,
+    left: proposedBounds.x,
+    right: proposedBounds.x + proposedBounds.width,
+  }
+
+  // Track snap offsets (only apply one per axis)
+  let snapOffsetX = 0
+  let snapOffsetY = 0
+  let bestDistance = Infinity
+
+  // Check against each existing room
+  for (const room of existingRooms) {
+    if (room.id === excludeRoomId) continue
+
+    const roomEdges = {
+      top: room.bounds.y,
+      bottom: room.bounds.y + room.bounds.height,
+      left: room.bounds.x,
+      right: room.bounds.x + room.bounds.width,
+    }
+
+    // Calculate overlap ranges for each axis
+    const horizontalOverlapStart = Math.max(proposedBounds.x, room.bounds.x)
+    const horizontalOverlapEnd = Math.min(proposedBounds.x + proposedBounds.width, room.bounds.x + room.bounds.width)
+    const hasHorizontalOverlap = horizontalOverlapEnd > horizontalOverlapStart
+
+    const verticalOverlapStart = Math.max(proposedBounds.y, room.bounds.y)
+    const verticalOverlapEnd = Math.min(proposedBounds.y + proposedBounds.height, room.bounds.y + room.bounds.height)
+    const hasVerticalOverlap = verticalOverlapEnd > verticalOverlapStart
+
+    // Check horizontal snaps (top/bottom edges) - only if there's horizontal overlap
+    if (hasHorizontalOverlap) {
+      // Proposed top to existing bottom
+      const topToBottomDist = Math.abs(proposedEdges.top - roomEdges.bottom)
+      if (topToBottomDist < SNAP_WITH_WALL_THRESHOLD && topToBottomDist < bestDistance && snapOffsetY === 0) {
+        bestDistance = topToBottomDist
+
+        if (topToBottomDist <= SNAP_DIRECT_THRESHOLD) {
+          // Direct connection - snap to touch
+          snapOffsetY = roomEdges.bottom - proposedEdges.top
+          connectionType = 'direct'
+        } else {
+          // Wall connection - snap with gap (no gap needed, walls are outside bounds)
+          snapOffsetY = roomEdges.bottom - proposedEdges.top
+          connectionType = 'wall'
+        }
+
+        adjacentRoomId = room.id
+        sharedEdge = {
+          start: { x: horizontalOverlapStart, y: roomEdges.bottom },
+          end: { x: horizontalOverlapEnd, y: roomEdges.bottom },
+          proposedSide: 'top',
+          adjacentSide: 'bottom',
+        }
+
+        snapGuides.push({
+          axis: 'horizontal',
+          position: roomEdges.bottom,
+          start: horizontalOverlapStart - 20,
+          end: horizontalOverlapEnd + 20,
+        })
+      }
+
+      // Proposed bottom to existing top
+      const bottomToTopDist = Math.abs(proposedEdges.bottom - roomEdges.top)
+      if (bottomToTopDist < SNAP_WITH_WALL_THRESHOLD && bottomToTopDist < bestDistance && snapOffsetY === 0) {
+        bestDistance = bottomToTopDist
+
+        if (bottomToTopDist <= SNAP_DIRECT_THRESHOLD) {
+          snapOffsetY = roomEdges.top - proposedEdges.bottom
+          connectionType = 'direct'
+        } else {
+          snapOffsetY = roomEdges.top - proposedEdges.bottom
+          connectionType = 'wall'
+        }
+
+        adjacentRoomId = room.id
+        sharedEdge = {
+          start: { x: horizontalOverlapStart, y: roomEdges.top },
+          end: { x: horizontalOverlapEnd, y: roomEdges.top },
+          proposedSide: 'bottom',
+          adjacentSide: 'top',
+        }
+
+        snapGuides.push({
+          axis: 'horizontal',
+          position: roomEdges.top,
+          start: horizontalOverlapStart - 20,
+          end: horizontalOverlapEnd + 20,
+        })
+      }
+    }
+
+    // Check vertical snaps (left/right edges) - only if there's vertical overlap
+    if (hasVerticalOverlap) {
+      // Proposed left to existing right
+      const leftToRightDist = Math.abs(proposedEdges.left - roomEdges.right)
+      if (leftToRightDist < SNAP_WITH_WALL_THRESHOLD && leftToRightDist < bestDistance && snapOffsetX === 0) {
+        bestDistance = leftToRightDist
+
+        if (leftToRightDist <= SNAP_DIRECT_THRESHOLD) {
+          snapOffsetX = roomEdges.right - proposedEdges.left
+          connectionType = 'direct'
+        } else {
+          snapOffsetX = roomEdges.right - proposedEdges.left
+          connectionType = 'wall'
+        }
+
+        adjacentRoomId = room.id
+        sharedEdge = {
+          start: { x: roomEdges.right, y: verticalOverlapStart },
+          end: { x: roomEdges.right, y: verticalOverlapEnd },
+          proposedSide: 'left',
+          adjacentSide: 'right',
+        }
+
+        snapGuides.push({
+          axis: 'vertical',
+          position: roomEdges.right,
+          start: verticalOverlapStart - 20,
+          end: verticalOverlapEnd + 20,
+        })
+      }
+
+      // Proposed right to existing left
+      const rightToLeftDist = Math.abs(proposedEdges.right - roomEdges.left)
+      if (rightToLeftDist < SNAP_WITH_WALL_THRESHOLD && rightToLeftDist < bestDistance && snapOffsetX === 0) {
+        bestDistance = rightToLeftDist
+
+        if (rightToLeftDist <= SNAP_DIRECT_THRESHOLD) {
+          snapOffsetX = roomEdges.left - proposedEdges.right
+          connectionType = 'direct'
+        } else {
+          snapOffsetX = roomEdges.left - proposedEdges.right
+          connectionType = 'wall'
+        }
+
+        adjacentRoomId = room.id
+        sharedEdge = {
+          start: { x: roomEdges.left, y: verticalOverlapStart },
+          end: { x: roomEdges.left, y: verticalOverlapEnd },
+          proposedSide: 'right',
+          adjacentSide: 'left',
+        }
+
+        snapGuides.push({
+          axis: 'vertical',
+          position: roomEdges.left,
+          start: verticalOverlapStart - 20,
+          end: verticalOverlapEnd + 20,
+        })
+      }
+    }
+  }
+
+  // Apply snap offsets
+  if (snapOffsetX !== 0 || snapOffsetY !== 0) {
+    snappedBounds = {
+      ...proposedBounds,
+      x: proposedBounds.x + snapOffsetX,
+      y: proposedBounds.y + snapOffsetY,
+    }
+  }
+
+  return { snappedBounds, snapGuides, connectionType, adjacentRoomId, sharedEdge }
+}
+
+/**
+ * Finds all rooms that are adjacent to the given room (edges touching or within snap threshold).
+ * Used to detect and create room connections.
+ */
+export function findAdjacentRooms(
+  roomBounds: RoomBounds,
+  allRooms: Room[],
+  excludeRoomId: string,
+  threshold: number = 1
+): Array<{
+  roomId: string
+  sharedEdge: { start: Point2D; end: Point2D }
+  proposedSide: 'top' | 'right' | 'bottom' | 'left'
+  adjacentSide: 'top' | 'right' | 'bottom' | 'left'
+}> {
+  const adjacent: Array<{
+    roomId: string
+    sharedEdge: { start: Point2D; end: Point2D }
+    proposedSide: 'top' | 'right' | 'bottom' | 'left'
+    adjacentSide: 'top' | 'right' | 'bottom' | 'left'
+  }> = []
+
+  const edges = {
+    top: roomBounds.y,
+    bottom: roomBounds.y + roomBounds.height,
+    left: roomBounds.x,
+    right: roomBounds.x + roomBounds.width,
+  }
+
+  for (const room of allRooms) {
+    if (room.id === excludeRoomId) continue
+
+    const roomEdges = {
+      top: room.bounds.y,
+      bottom: room.bounds.y + room.bounds.height,
+      left: room.bounds.x,
+      right: room.bounds.x + room.bounds.width,
+    }
+
+    // Check for horizontal adjacency (top/bottom)
+    const horizontalOverlapStart = Math.max(roomBounds.x, room.bounds.x)
+    const horizontalOverlapEnd = Math.min(roomBounds.x + roomBounds.width, room.bounds.x + room.bounds.width)
+    const hasHorizontalOverlap = horizontalOverlapEnd - horizontalOverlapStart > threshold
+
+    if (hasHorizontalOverlap) {
+      // Check if top edge touches other's bottom
+      if (Math.abs(edges.top - roomEdges.bottom) <= threshold) {
+        adjacent.push({
+          roomId: room.id,
+          sharedEdge: {
+            start: { x: horizontalOverlapStart, y: edges.top },
+            end: { x: horizontalOverlapEnd, y: edges.top },
+          },
+          proposedSide: 'top',
+          adjacentSide: 'bottom',
+        })
+      }
+      // Check if bottom edge touches other's top
+      if (Math.abs(edges.bottom - roomEdges.top) <= threshold) {
+        adjacent.push({
+          roomId: room.id,
+          sharedEdge: {
+            start: { x: horizontalOverlapStart, y: edges.bottom },
+            end: { x: horizontalOverlapEnd, y: edges.bottom },
+          },
+          proposedSide: 'bottom',
+          adjacentSide: 'top',
+        })
+      }
+    }
+
+    // Check for vertical adjacency (left/right)
+    const verticalOverlapStart = Math.max(roomBounds.y, room.bounds.y)
+    const verticalOverlapEnd = Math.min(roomBounds.y + roomBounds.height, room.bounds.y + room.bounds.height)
+    const hasVerticalOverlap = verticalOverlapEnd - verticalOverlapStart > threshold
+
+    if (hasVerticalOverlap) {
+      // Check if left edge touches other's right
+      if (Math.abs(edges.left - roomEdges.right) <= threshold) {
+        adjacent.push({
+          roomId: room.id,
+          sharedEdge: {
+            start: { x: edges.left, y: verticalOverlapStart },
+            end: { x: edges.left, y: verticalOverlapEnd },
+          },
+          proposedSide: 'left',
+          adjacentSide: 'right',
+        })
+      }
+      // Check if right edge touches other's left
+      if (Math.abs(edges.right - roomEdges.left) <= threshold) {
+        adjacent.push({
+          roomId: room.id,
+          sharedEdge: {
+            start: { x: edges.right, y: verticalOverlapStart },
+            end: { x: edges.right, y: verticalOverlapEnd },
+          },
+          proposedSide: 'right',
+          adjacentSide: 'left',
+        })
+      }
+    }
+  }
+
+  return adjacent
 }
 

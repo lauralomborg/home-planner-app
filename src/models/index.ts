@@ -88,6 +88,27 @@ export interface Wall {
 }
 
 // ============================================
+// Room Connection Types
+// ============================================
+
+export interface ConnectionOpening {
+  id: string
+  position: number  // Position along the shared edge (0 to 1)
+  width: number     // Width as fraction of edge length (0 to 1)
+}
+
+export interface RoomConnection {
+  id: string
+  roomIds: [string, string]  // The two connected rooms
+  type: 'wall' | 'direct'    // With shared wall or direct connection (no wall)
+  sharedEdge: {
+    start: Point2D
+    end: Point2D
+  }
+  openings: ConnectionOpening[]  // Passages in the shared wall (for 'wall' type)
+}
+
+// ============================================
 // Room Types
 // ============================================
 
@@ -272,6 +293,7 @@ export interface FloorPlan {
   doors: DoorInstance[]
   lights: LightInstance[]
   groups: FurnitureGroup[]
+  roomConnections: RoomConnection[]
 }
 
 // ============================================
@@ -372,6 +394,7 @@ export function createEmptyFloorPlan(): FloorPlan {
     doors: [],
     lights: [],
     groups: [],
+    roomConnections: [],
   }
 }
 

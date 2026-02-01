@@ -9,7 +9,7 @@ import { FURNITURE_CATALOG } from '@/services/catalog'
 import { COLORS_2D } from '@/constants/colors'
 
 // Import extracted components
-import { WallShape, WallJointShape, WindowShape, DoorShape, RoomShape, FurnitureShape } from './shapes'
+import { WallShape, WallJointShape, WindowShape, DoorShape, RoomShape, FurnitureShape, ConnectionShape } from './shapes'
 import { Grid, OriginMarker, WallPreview } from './utils'
 import { GRID_SIZE, snapToGrid } from './types'
 import { buildWallJointMap, findNearestWallEndpoint, WALL_CONNECTION_TOLERANCE, calculateRoomSnap } from '@/services/geometry'
@@ -32,8 +32,12 @@ export function Canvas2D() {
   const [isDraggingFurniture, setIsDraggingFurniture] = useState(false)
   const draggedIdsRef = useRef<string[]>([])
 
-  // Track selected nodes for transformer (furniture/rooms)
+  // Track selected nodes for transformer (furniture only - with rotation)
   const selectedNodesRef = useRef<Map<string, Konva.Rect>>(new Map())
+
+  // Track selected room nodes for transformer (rooms only - no rotation)
+  const roomTransformerRef = useRef<Konva.Transformer>(null)
+  const selectedRoomNodesRef = useRef<Map<string, Konva.Rect>>(new Map())
 
   // Door/window transformer (width-only, no rotation)
   const doorWindowTransformerRef = useRef<Konva.Transformer>(null)
@@ -42,7 +46,7 @@ export function Canvas2D() {
   // Track when marquee selection just finished to prevent click handler from clearing it
   const justFinishedMarqueeRef = useRef(false)
 
-  // Callbacks for registering/unregistering nodes with transformer (furniture/rooms)
+  // Callbacks for registering/unregistering nodes with transformer (furniture only)
   const handleRegisterNode = useCallback((id: string, node: Konva.Rect) => {
     selectedNodesRef.current.set(id, node)
     if (transformerRef.current) {
@@ -54,6 +58,21 @@ export function Canvas2D() {
     selectedNodesRef.current.delete(id)
     if (transformerRef.current) {
       transformerRef.current.nodes(Array.from(selectedNodesRef.current.values()))
+    }
+  }, [])
+
+  // Callbacks for registering/unregistering room nodes (rooms only - no rotation)
+  const handleRegisterRoomNode = useCallback((id: string, node: Konva.Rect) => {
+    selectedRoomNodesRef.current.set(id, node)
+    if (roomTransformerRef.current) {
+      roomTransformerRef.current.nodes(Array.from(selectedRoomNodesRef.current.values()))
+    }
+  }, [])
+
+  const handleUnregisterRoomNode = useCallback((id: string) => {
+    selectedRoomNodesRef.current.delete(id)
+    if (roomTransformerRef.current) {
+      roomTransformerRef.current.nodes(Array.from(selectedRoomNodesRef.current.values()))
     }
   }, [])
 
@@ -85,6 +104,7 @@ export function Canvas2D() {
   const walls = useFloorPlanStore((state) => state.floorPlan.walls)
   const roomsUnsorted = useFloorPlanStore((state) => state.floorPlan.rooms)
   const furniture = useFloorPlanStore((state) => state.floorPlan.furniture)
+  const roomConnections = useFloorPlanStore((state) => state.floorPlan.roomConnections)
 
   // Sort rooms so larger (parent) rooms render first (behind) and smaller (child) rooms render on top
   // This ensures child rooms are clickable/draggable when nested inside parent rooms
@@ -635,8 +655,8 @@ export function Canvas2D() {
               isHovered={hoveredId === room.id}
               scale={zoom2D}
               isPanning={isPanning}
-              onRegisterNode={handleRegisterNode}
-              onUnregisterNode={handleUnregisterNode}
+              onRegisterNode={handleRegisterRoomNode}
+              onUnregisterNode={handleUnregisterRoomNode}
             />
           ))}
 
@@ -650,6 +670,16 @@ export function Canvas2D() {
               scale={zoom2D}
               startIsJoint={isEndpointAtJoint(wall.id, 'start')}
               endIsJoint={isEndpointAtJoint(wall.id, 'end')}
+            />
+          ))}
+
+          {/* Room Connections (dotted lines for direct connections, openings for wall connections) */}
+          {roomConnections.map((connection) => (
+            <ConnectionShape
+              key={connection.id}
+              connection={connection}
+              isSelected={selectedIds.includes(connection.id)}
+              scale={zoom2D}
             />
           ))}
 
@@ -715,7 +745,7 @@ export function Canvas2D() {
             />
           ))}
 
-          {/* Transformer (furniture/rooms - full resize + rotation) */}
+          {/* Transformer (furniture only - full resize + rotation) */}
           <Transformer
             ref={transformerRef}
             rotateEnabled={true}
@@ -728,6 +758,20 @@ export function Canvas2D() {
             borderStrokeWidth={1 / zoom2D}
             enabledAnchors={['top-left', 'top-right', 'bottom-left', 'bottom-right', 'top-center', 'bottom-center', 'middle-left', 'middle-right']}
             boundBoxFunc={(oldBox, newBox) => (newBox.width < 20 || newBox.height < 20) ? oldBox : newBox}
+          />
+
+          {/* Transformer (rooms only - resize without rotation) */}
+          <Transformer
+            ref={roomTransformerRef}
+            rotateEnabled={false}
+            anchorSize={8 / zoom2D}
+            anchorStroke={COLORS_2D.handle}
+            anchorFill={COLORS_2D.handleFill}
+            anchorCornerRadius={2 / zoom2D}
+            borderStroke={COLORS_2D.handle}
+            borderStrokeWidth={1 / zoom2D}
+            enabledAnchors={['top-left', 'top-right', 'bottom-left', 'bottom-right', 'top-center', 'bottom-center', 'middle-left', 'middle-right']}
+            boundBoxFunc={(oldBox, newBox) => (newBox.width < 50 || newBox.height < 50) ? oldBox : newBox}
           />
 
           {/* Door/Window Transformer (width-only, no rotation) */}

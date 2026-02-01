@@ -15,10 +15,13 @@ import type {
   MaterialRef,
   RoomType,
   Dimensions3D,
+  RoomConnection,
+  ConnectionOpening,
 } from '@/models'
 import {
   detectRooms as detectRoomsFromWalls,
   generateWallsFromBounds,
+  generateWallsFromBoundsWithConnections,
   getContainedFurnitureIds,
   getContainedRoomIds,
   findParentRoomForPoint,
@@ -154,6 +157,18 @@ interface FloorPlanState {
   finishRoomMove: (roomId: string) => void
   reparentRoom: (roomId: string, newParentRoomId: string | null) => void
 
+  // Room connection actions
+  addRoomConnection: (connection: Omit<RoomConnection, 'id'>) => string
+  updateRoomConnection: (id: string, updates: Partial<Omit<RoomConnection, 'id'>>) => void
+  removeRoomConnection: (id: string) => void
+  getConnectionBetweenRooms: (roomId1: string, roomId2: string) => RoomConnection | undefined
+  getConnectionsForRoom: (roomId: string) => RoomConnection[]
+  addConnectionOpening: (connectionId: string, opening: Omit<ConnectionOpening, 'id'>) => string | null
+  updateConnectionOpening: (connectionId: string, openingId: string, updates: Partial<Omit<ConnectionOpening, 'id'>>) => void
+  removeConnectionOpening: (connectionId: string, openingId: string) => void
+  regenerateRoomWalls: (roomId: string) => void
+  regenerateAllRoomWalls: () => void
+
   // Getters
   getWallById: (id: string) => Wall | undefined
   getRoomById: (id: string) => Room | undefined
@@ -165,6 +180,7 @@ interface FloorPlanState {
   getRootFurniture: () => FurnitureInstance[]
   getGroupsForRoom: (roomId: string) => FurnitureGroup[]
   getRootGroups: () => FurnitureGroup[]
+  getRoomConnectionById: (id: string) => RoomConnection | undefined
 }
 
 export const useFloorPlanStore = create<FloorPlanState>()(
@@ -179,6 +195,7 @@ export const useFloorPlanStore = create<FloorPlanState>()(
         doors: [],
         lights: [],
         groups: [],
+        roomConnections: [],
       },
 
     // ==================== Wall Actions ====================
@@ -1125,6 +1142,7 @@ export const useFloorPlanStore = create<FloorPlanState>()(
           doors: [],
           lights: [],
           groups: [],
+          roomConnections: [],
         }
       })
     },
@@ -1625,6 +1643,255 @@ export const useFloorPlanStore = create<FloorPlanState>()(
       })
     },
 
+    // ==================== Room Connection Actions ====================
+
+    addRoomConnection: (connection) => {
+      const id = crypto.randomUUID()
+      const roomIds = connection.roomIds
+      set((state) => {
+        state.floorPlan.roomConnections.push({
+          ...connection,
+          id,
+        })
+      })
+      // Regenerate walls for both connected rooms
+      get().regenerateRoomWalls(roomIds[0])
+      get().regenerateRoomWalls(roomIds[1])
+      return id
+    },
+
+    updateRoomConnection: (id, updates) => {
+      const connection = get().floorPlan.roomConnections.find((c) => c.id === id)
+      const roomIds = connection?.roomIds
+      set((state) => {
+        const conn = state.floorPlan.roomConnections.find((c) => c.id === id)
+        if (conn) {
+          Object.assign(conn, updates)
+        }
+      })
+      // If the connection type changed, regenerate walls
+      if (roomIds && updates.type !== undefined) {
+        get().regenerateRoomWalls(roomIds[0])
+        get().regenerateRoomWalls(roomIds[1])
+      }
+    },
+
+    removeRoomConnection: (id) => {
+      const connection = get().floorPlan.roomConnections.find((c) => c.id === id)
+      const roomIds = connection?.roomIds
+      set((state) => {
+        state.floorPlan.roomConnections = state.floorPlan.roomConnections.filter(
+          (c) => c.id !== id
+        )
+      })
+      // Regenerate walls for both previously connected rooms
+      if (roomIds) {
+        get().regenerateRoomWalls(roomIds[0])
+        get().regenerateRoomWalls(roomIds[1])
+      }
+    },
+
+    getConnectionBetweenRooms: (roomId1, roomId2) => {
+      return get().floorPlan.roomConnections.find(
+        (c) =>
+          (c.roomIds[0] === roomId1 && c.roomIds[1] === roomId2) ||
+          (c.roomIds[0] === roomId2 && c.roomIds[1] === roomId1)
+      )
+    },
+
+    getConnectionsForRoom: (roomId) => {
+      return get().floorPlan.roomConnections.filter(
+        (c) => c.roomIds[0] === roomId || c.roomIds[1] === roomId
+      )
+    },
+
+    addConnectionOpening: (connectionId, opening) => {
+      const id = crypto.randomUUID()
+      const connection = get().floorPlan.roomConnections.find((c) => c.id === connectionId)
+      if (!connection) return null
+
+      set((state) => {
+        const conn = state.floorPlan.roomConnections.find((c) => c.id === connectionId)
+        if (conn) {
+          conn.openings.push({
+            ...opening,
+            id,
+          })
+        }
+      })
+
+      // Regenerate walls for both rooms to reflect the new opening
+      get().regenerateRoomWalls(connection.roomIds[0])
+      get().regenerateRoomWalls(connection.roomIds[1])
+      return id
+    },
+
+    updateConnectionOpening: (connectionId, openingId, updates) => {
+      const connection = get().floorPlan.roomConnections.find((c) => c.id === connectionId)
+      set((state) => {
+        const conn = state.floorPlan.roomConnections.find((c) => c.id === connectionId)
+        if (conn) {
+          const opening = conn.openings.find((o) => o.id === openingId)
+          if (opening) {
+            Object.assign(opening, updates)
+          }
+        }
+      })
+      // Regenerate walls for both rooms to reflect the updated opening
+      if (connection) {
+        get().regenerateRoomWalls(connection.roomIds[0])
+        get().regenerateRoomWalls(connection.roomIds[1])
+      }
+    },
+
+    removeConnectionOpening: (connectionId, openingId) => {
+      const connection = get().floorPlan.roomConnections.find((c) => c.id === connectionId)
+      set((state) => {
+        const conn = state.floorPlan.roomConnections.find((c) => c.id === connectionId)
+        if (conn) {
+          conn.openings = conn.openings.filter((o) => o.id !== openingId)
+        }
+      })
+      // Regenerate walls for both rooms to reflect the removed opening
+      if (connection) {
+        get().regenerateRoomWalls(connection.roomIds[0])
+        get().regenerateRoomWalls(connection.roomIds[1])
+      }
+    },
+
+    getRoomConnectionById: (id) =>
+      get().floorPlan.roomConnections.find((c) => c.id === id),
+
+    regenerateRoomWalls: (roomId) => {
+      const state = get()
+      const room = state.floorPlan.rooms.find((r) => r.id === roomId)
+      if (!room) return
+
+      // Get connections for this room
+      const connections = state.floorPlan.roomConnections.filter(
+        (c) => c.roomIds.includes(roomId)
+      )
+
+      set((draft) => {
+        // Get existing walls for this room
+        const existingWalls = draft.floorPlan.walls.filter((w) => w.ownerRoomId === roomId)
+        const existingWallIds = existingWalls.map((w) => w.id)
+
+        // Save windows/doors attached to existing walls
+        const affectedWindows = draft.floorPlan.windows.filter((w) =>
+          existingWallIds.includes(w.wallId)
+        )
+        const affectedDoors = draft.floorPlan.doors.filter((d) =>
+          existingWallIds.includes(d.wallId)
+        )
+
+        // Remove old walls
+        draft.floorPlan.walls = draft.floorPlan.walls.filter((w) => w.ownerRoomId !== roomId)
+
+        // Generate new walls considering connections
+        const wallData = generateWallsFromBoundsWithConnections(room.bounds, roomId, connections)
+        const newWallIds: string[] = []
+
+        for (const wall of wallData) {
+          const wallId = crypto.randomUUID()
+          newWallIds.push(wallId)
+          draft.floorPlan.walls.push({
+            ...wall,
+            id: wallId,
+          })
+        }
+
+        // Update room's wallIds
+        const r = draft.floorPlan.rooms.find((r) => r.id === roomId)
+        if (r) {
+          r.wallIds = newWallIds
+        }
+
+        // Re-attach windows/doors to new walls by matching edge positions
+        // For simplicity, we'll try to match by wall orientation and position
+        for (const window of affectedWindows) {
+          const oldWall = existingWalls.find((w) => w.id === window.wallId)
+          if (!oldWall) continue
+
+          // Find a matching new wall
+          const newWall = draft.floorPlan.walls.find((w) => {
+            if (!newWallIds.includes(w.id)) return false
+            // Check if walls are roughly parallel and in similar position
+            const oldDx = oldWall.end.x - oldWall.start.x
+            const oldDy = oldWall.end.y - oldWall.start.y
+            const newDx = w.end.x - w.start.x
+            const newDy = w.end.y - w.start.y
+            const oldIsHorizontal = Math.abs(oldDy) < Math.abs(oldDx)
+            const newIsHorizontal = Math.abs(newDy) < Math.abs(newDx)
+            return oldIsHorizontal === newIsHorizontal &&
+              Math.abs((oldWall.start.y + oldWall.end.y) / 2 - (w.start.y + w.end.y) / 2) < 50
+          })
+
+          if (newWall) {
+            window.wallId = newWall.id
+            const wallLength = Math.sqrt(
+              Math.pow(newWall.end.x - newWall.start.x, 2) +
+              Math.pow(newWall.end.y - newWall.start.y, 2)
+            )
+            // Clamp position
+            window.position = Math.min(window.position, wallLength - window.width)
+            // Add opening to wall
+            newWall.openings.push({
+              id: crypto.randomUUID(),
+              type: 'window',
+              position: window.position,
+              width: window.width,
+              height: window.height,
+              elevationFromFloor: window.elevationFromFloor,
+              referenceId: window.id,
+            })
+          }
+        }
+
+        for (const door of affectedDoors) {
+          const oldWall = existingWalls.find((w) => w.id === door.wallId)
+          if (!oldWall) continue
+
+          const newWall = draft.floorPlan.walls.find((w) => {
+            if (!newWallIds.includes(w.id)) return false
+            const oldDx = oldWall.end.x - oldWall.start.x
+            const oldDy = oldWall.end.y - oldWall.start.y
+            const newDx = w.end.x - w.start.x
+            const newDy = w.end.y - w.start.y
+            const oldIsHorizontal = Math.abs(oldDy) < Math.abs(oldDx)
+            const newIsHorizontal = Math.abs(newDy) < Math.abs(newDx)
+            return oldIsHorizontal === newIsHorizontal &&
+              Math.abs((oldWall.start.y + oldWall.end.y) / 2 - (w.start.y + w.end.y) / 2) < 50
+          })
+
+          if (newWall) {
+            door.wallId = newWall.id
+            const wallLength = Math.sqrt(
+              Math.pow(newWall.end.x - newWall.start.x, 2) +
+              Math.pow(newWall.end.y - newWall.start.y, 2)
+            )
+            door.position = Math.min(door.position, wallLength - door.width)
+            newWall.openings.push({
+              id: crypto.randomUUID(),
+              type: 'door',
+              position: door.position,
+              width: door.width,
+              height: door.height,
+              elevationFromFloor: 0,
+              referenceId: door.id,
+            })
+          }
+        }
+      })
+    },
+
+    regenerateAllRoomWalls: () => {
+      const state = get()
+      for (const room of state.floorPlan.rooms) {
+        get().regenerateRoomWalls(room.id)
+      }
+    },
+
     getFurnitureForRoom: (roomId) => {
       // Get furniture directly in this room (not in a group)
       return get().floorPlan.furniture.filter((f) =>
@@ -1651,10 +1918,10 @@ export const useFloorPlanStore = create<FloorPlanState>()(
   })),
     {
       name: 'home-planner-floorplan',
-      version: 3,
+      version: 4,
       migrate: (persistedState: unknown, version: number) => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const state = persistedState as { floorPlan: FloorPlan & { furniture: any[]; groups: any[]; rooms: any[] } }
+        const state = persistedState as { floorPlan: FloorPlan & { furniture: any[]; groups: any[]; rooms: any[]; roomConnections?: any[] } }
 
         if (version === 1) {
           // Migration from v1 to v2: calculate parentRoomId for furniture
@@ -1698,6 +1965,13 @@ export const useFloorPlanStore = create<FloorPlanState>()(
               g.parentRoomId = firstMember.parentRoomId
             }
             delete g.memberIds
+          }
+        }
+
+        if (version <= 3) {
+          // Migration from v3 to v4: add roomConnections array
+          if (!state.floorPlan.roomConnections) {
+            state.floorPlan.roomConnections = []
           }
         }
 
