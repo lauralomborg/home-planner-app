@@ -61,23 +61,26 @@ export const RoomShape = memo(function RoomShape({
         draggable={activeTool === 'select'}
         onDragStart={() => setIsDragging(true)}
         onDragMove={(e) => {
-          const newPos = { x: e.target.x(), y: e.target.y() }
+          // Snap to 1cm grid using position() for instant snapping
+          const pos = e.target.position()
+          const gridSnappedX = Math.round(pos.x)
+          const gridSnappedY = Math.round(pos.y)
+          e.target.position({ x: gridSnappedX, y: gridSnappedY })
 
-          // Calculate proposed bounds
+          // Calculate proposed bounds with grid-snapped position
           const proposedBounds = {
-            x: newPos.x,
-            y: newPos.y,
+            x: gridSnappedX,
+            y: gridSnappedY,
             width: room.bounds.width,
             height: room.bounds.height,
           }
 
-          // Calculate snap with other rooms
+          // Calculate snap with other rooms (room-to-room alignment)
           const snapResult = calculateRoomSnap(proposedBounds, allRooms, room.id, 20)
           setRoomSnapGuides(snapResult.snapGuides)
 
-          // Apply snapped position
-          e.target.x(snapResult.snappedBounds.x)
-          e.target.y(snapResult.snappedBounds.y)
+          // Apply room-to-room snapped position (overrides grid snap when rooms align)
+          e.target.position({ x: snapResult.snappedBounds.x, y: snapResult.snappedBounds.y })
           moveRoomTo(room.id, { x: snapResult.snappedBounds.x, y: snapResult.snappedBounds.y })
         }}
         onDragEnd={() => {
@@ -97,10 +100,14 @@ export const RoomShape = memo(function RoomShape({
           node.scaleX(1)
           node.scaleY(1)
 
-          // Update room bounds with new position and scaled dimensions
+          // Snap position to 1cm grid after transform
+          const snappedX = Math.round(node.x())
+          const snappedY = Math.round(node.y())
+
+          // Update room bounds with snapped position and scaled dimensions
           resizeRoom(room.id, {
-            x: node.x(),
-            y: node.y(),
+            x: snappedX,
+            y: snappedY,
             width: Math.max(50, width * scaleX),
             height: Math.max(50, height * scaleY),
           })

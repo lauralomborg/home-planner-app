@@ -97,7 +97,7 @@ export function Canvas2D() {
   }, [roomsUnsorted])
   const windows = useFloorPlanStore((state) => state.floorPlan.windows)
   const doors = useFloorPlanStore((state) => state.floorPlan.doors)
-  const { addWall, removeSelected, addWindow, addDoor, createRoomFromBounds, addFurniture } = useFloorPlanStore()
+  const { addWall, removeSelected, addWindow, addDoor, createRoomFromBounds, addFurniture, moveRoom, moveMultipleFurniture } = useFloorPlanStore()
 
   const {
     activeTool,
@@ -498,6 +498,35 @@ export function Canvas2D() {
         removeSelected(selectedIds)
         clearSelection()
       }
+
+      // Arrow key movement for selected elements
+      if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key) && selectedIds.length > 0) {
+        e.preventDefault()
+        const step = e.shiftKey ? 10 : 1  // 10cm with Shift, 1cm otherwise
+
+        let deltaX = 0
+        let deltaY = 0
+        if (e.key === 'ArrowUp') deltaY = -step
+        if (e.key === 'ArrowDown') deltaY = step
+        if (e.key === 'ArrowLeft') deltaX = -step
+        if (e.key === 'ArrowRight') deltaX = step
+
+        // Move selected furniture
+        const selectedFurnitureIds = selectedIds.filter(id =>
+          furniture.some(f => f.id === id)
+        )
+        if (selectedFurnitureIds.length > 0) {
+          moveMultipleFurniture(selectedFurnitureIds, { x: deltaX, y: deltaY })
+        }
+
+        // Move selected rooms
+        const selectedRoomIds = selectedIds.filter(id =>
+          rooms.some(r => r.id === id)
+        )
+        selectedRoomIds.forEach(roomId => {
+          moveRoom(roomId, { x: deltaX, y: deltaY })
+        })
+      }
     }
 
     const handleKeyUp = (e: KeyboardEvent) => {
@@ -514,7 +543,7 @@ export function Canvas2D() {
       window.removeEventListener('keydown', handleKeyDown)
       window.removeEventListener('keyup', handleKeyUp)
     }
-  }, [isDrawingWall, cancelWallDraw, clearSelection, selectedIds, removeSelected, setActiveTool, roomDrawStart, isPanning, isMarqueeSelecting, finishMarquee])
+  }, [isDrawingWall, cancelWallDraw, clearSelection, selectedIds, removeSelected, setActiveTool, roomDrawStart, isPanning, isMarqueeSelecting, finishMarquee, furniture, rooms, moveMultipleFurniture, moveRoom])
 
   // Calculate alignment guides during furniture drag
   useEffect(() => {

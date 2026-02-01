@@ -1,6 +1,6 @@
 import type { KonvaEventObject } from 'konva/lib/Node'
 
-export const GRID_SIZE = 50 // 50cm grid
+export const GRID_SIZE = 1 // 1cm grid
 
 // Handle selection with modifier keys (Figma-style)
 export function handleSelectWithModifiers(

@@ -19,28 +19,28 @@ export function calculateAlignmentGuides(
   let snapDeltaY = 0
   const threshold = SNAP_THRESHOLD / scale
 
-  // Get bounding box of dragged items
+  // Get bounding box of dragged items (using top-left anchor)
   if (draggedItems.length === 0) return { guides, snapDelta: { x: 0, y: 0 } }
 
   const draggedBounds = {
-    left: Math.min(...draggedItems.map((f) => f.position.x - f.dimensions.width / 2)),
-    right: Math.max(...draggedItems.map((f) => f.position.x + f.dimensions.width / 2)),
-    top: Math.min(...draggedItems.map((f) => f.position.y - f.dimensions.depth / 2)),
-    bottom: Math.max(...draggedItems.map((f) => f.position.y + f.dimensions.depth / 2)),
+    left: Math.min(...draggedItems.map((f) => f.position.x)),
+    right: Math.max(...draggedItems.map((f) => f.position.x + f.dimensions.width)),
+    top: Math.min(...draggedItems.map((f) => f.position.y)),
+    bottom: Math.max(...draggedItems.map((f) => f.position.y + f.dimensions.depth)),
   }
   const draggedCenterX = (draggedBounds.left + draggedBounds.right) / 2
   const draggedCenterY = (draggedBounds.top + draggedBounds.bottom) / 2
 
-  // Check alignment with other items
+  // Check alignment with other items (using top-left anchor)
   for (const other of otherItems) {
     const otherBounds = {
-      left: other.position.x - other.dimensions.width / 2,
-      right: other.position.x + other.dimensions.width / 2,
-      top: other.position.y - other.dimensions.depth / 2,
-      bottom: other.position.y + other.dimensions.depth / 2,
+      left: other.position.x,
+      right: other.position.x + other.dimensions.width,
+      top: other.position.y,
+      bottom: other.position.y + other.dimensions.depth,
     }
-    const otherCenterX = other.position.x
-    const otherCenterY = other.position.y
+    const otherCenterX = (otherBounds.left + otherBounds.right) / 2
+    const otherCenterY = (otherBounds.top + otherBounds.bottom) / 2
 
     // Vertical guides (for X alignment)
     const verticalChecks = [

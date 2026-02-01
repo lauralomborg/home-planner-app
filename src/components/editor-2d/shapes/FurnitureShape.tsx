@@ -90,8 +90,8 @@ export const FurnitureShape = memo(function FurnitureShape({
       {/* Group indicator badge */}
       {isGrouped && !isInEditMode && (
         <Circle
-          x={furniture.position.x + furniture.dimensions.width / 2 - 8 / scale}
-          y={furniture.position.y - furniture.dimensions.depth / 2 + 8 / scale}
+          x={furniture.position.x - 8 / scale}
+          y={furniture.position.y + 8 / scale}
           radius={6 / scale}
           fill={GROUP_COLORS.indicator}
           stroke="#FFFFFF"
@@ -105,8 +105,8 @@ export const FurnitureShape = memo(function FurnitureShape({
         y={furniture.position.y}
         width={furniture.dimensions.width}
         height={furniture.dimensions.depth}
-        offsetX={furniture.dimensions.width / 2}
-        offsetY={furniture.dimensions.depth / 2}
+        offsetX={0}
+        offsetY={0}
         rotation={furniture.rotation}
         fill={color}
         opacity={0.8}
@@ -146,7 +146,13 @@ export const FurnitureShape = memo(function FurnitureShape({
           onDragUpdate(true, dragIds)
         }}
         onDragMove={(e) => {
-          const newPos = { x: e.target.x(), y: e.target.y() }
+          // Snap to 1cm grid using position() for instant snapping
+          const pos = e.target.position()
+          const snappedX = Math.round(pos.x)
+          const snappedY = Math.round(pos.y)
+          e.target.position({ x: snappedX, y: snappedY })
+
+          const newPos = { x: snappedX, y: snappedY }
 
           // If this item is selected and there are multiple selected, move all
           if (isSelected && selectedIds.length > 1 && dragStartPos.current) {
@@ -193,7 +199,10 @@ export const FurnitureShape = memo(function FurnitureShape({
             depth: Math.max(10, furniture.dimensions.depth * scaleY),
             height: furniture.dimensions.height,
           })
-          moveFurniture(id, { x: node.x(), y: node.y() })
+          // Snap position to 1cm grid after transform
+          const snappedX = Math.round(node.x())
+          const snappedY = Math.round(node.y())
+          moveFurniture(id, { x: snappedX, y: snappedY })
           rotateFurniture(id, node.rotation())
         }}
       />
